@@ -21,9 +21,7 @@
 Breeze TTS 2 is an open-weight text-to-speech model built for real-time interaction. It ranks #1 among open-weight models on the Artificial Analysis TTS leaderboard, while outperforming frontier proprietary systems. Its open-ended natural-language instruction-following capability supports reference-free voice design and reference-guided voice direction, while ultra-low-latency streaming enables responsive, expressive interaction.
 
 <div align="center">
-  <a href="https://artificialanalysis.ai/text-to-speech/leaderboard/provider-voice">
-    <img src="assets/tts-elo-leaderboard.svg" alt="Text-to-speech models ranked by Artificial Analysis Elo score" width="90%">
-  </a>
+  <img src="assets/tts-elo-leaderboard.svg" alt="Text-to-speech models ranked by Artificial Analysis Elo score" width="100%">
 </div>
 
 ## ✨ Highlights
@@ -134,7 +132,7 @@ python infer.py ../breeze-tts-2 \
   --ref-audio reference.wav \
   --ref-text "This is the exact transcript of the reference audio." \
   --text "(clears throat) We need to discuss what happened last night." \
-  --instruction "Preserve the speaker identity, but speak slowly with a restrained, serious tone." \
+  --instruction "Speak slowly with a restrained, serious tone." \
   --cfg-scale 4 \
   --output outputs/voice_direction.wav
 ```
@@ -155,7 +153,7 @@ curl -X POST http://127.0.0.1:7860/v1/audio/speech \
   -F "ref_audio=@reference.wav" \
   -F "ref_text=This is the exact transcript of the reference audio." \
   -F "text=(clears throat) We need to discuss what happened last night." \
-  -F "instruction=Preserve the speaker identity, but speak slowly with a restrained, serious tone." \
+  -F "instruction=Speak slowly with a restrained, serious tone." \
   -F "seed=42" \
   --output voice_direction.pcm
 ```
