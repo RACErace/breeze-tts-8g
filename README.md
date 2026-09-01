@@ -177,9 +177,9 @@ Individual stage flags are intended for profiling and debugging.
 
 ## License and Responsible Use
 
-The source code is licensed under the [Apache License, Version 2.0](https://github.com/breezeblue-ai/breeze-tts/blob/main/LICENSE). Model weights, checkpoints, adapters, derivative models, and self-hosted outputs are governed separately by the [BreezeBlue Research and Non-Commercial License](https://huggingface.co/BreezeBlue/Breeze-TTS-2/blob/main/LICENSE). The Apache License does not grant rights to use the model commercially.
+The source code is licensed under the [Apache License, Version 2.0](https://github.com/breezeblue-ai/breeze-tts/blob/main/LICENSE). The audio tokenizer is based on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) by the Alibaba Qwen Team and is licensed under the Apache License, Version 2.0. Model weights, checkpoints, adapters, derivative models, and self-hosted outputs are governed separately by the [BreezeBlue Research and Non-Commercial License](https://huggingface.co/BreezeBlue/Breeze-TTS-2/blob/main/LICENSE). The Apache License does not grant rights to use the model commercially.
 
-Commercial use requires written authorization from RESONIA, INC. Hosted BreezeBlue services are governed by their applicable service terms. For commercial licensing, contact [contact@breeze.blue](mailto:contact@breeze.blue).
+Commercial use requires written authorization from BreezeBlue AI. Hosted BreezeBlue services are governed by their applicable service terms. For commercial licensing, contact [contact@breeze.blue](mailto:contact@breeze.blue).
 
 You are responsible for complying with applicable laws and obtaining all necessary rights and consents for inputs, reference audio, voices, and outputs. Unauthorized voice cloning, impersonation, fraud, and other unlawful or harmful uses are prohibited.
 
