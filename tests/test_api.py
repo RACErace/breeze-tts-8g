@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import huggingface_hub
@@ -105,6 +106,9 @@ def test_streaming_reseeds_immediately_before_model_sampling(monkeypatch) -> Non
 
 class FakeBatchModel:
     def __init__(self, lengths: list[int] | None = None) -> None:
+        self.depth_decoder = SimpleNamespace(
+            model=SimpleNamespace(layers=[], norm=torch.nn.Identity())
+        )
         self.lengths = lengths
         self.calls = []
         self.head = torch.nn.Linear(2, 2)
@@ -118,6 +122,25 @@ class FakeBatchModel:
             raise self.error
         lengths = self.lengths or [2] * kwargs["batch_size"]
         return [torch.full((1, length), 0.5) for length in lengths]
+
+
+class FakeBatchDepthDecoder:
+    def prepare(self, batch_size):
+        self.prepared_sizes.append(batch_size)
+
+    def __init__(self) -> None:
+        self.bound_models = []
+        self.prepared_sizes = []
+        self.active = False
+
+    @contextmanager
+    def bound(self, model):
+        self.bound_models.append(model)
+        self.active = True
+        try:
+            yield
+        finally:
+            self.active = False
 
 
 @pytest.fixture
@@ -144,8 +167,13 @@ def batch_client(monkeypatch):
         {model.head: batch_weight},
         raising=False,
     )
+    depth_decoder = FakeBatchDepthDecoder()
+    monkeypatch.setattr(
+        app.state, "batch_depth_decoder", depth_decoder, raising=False
+    )
     client = TestClient(app)
     client.batch_weight = batch_weight
+    client.depth_decoder = depth_decoder
     client.model = model
     client.prepared = prepared
     return client
@@ -259,6 +287,25 @@ def test_batch_generates_with_checkpoint_head_weights(batch_client) -> None:
     assert response.status_code == 200
     assert batch_client.model.weights_during_generate == [batch_client.batch_weight]
     assert head.weight is original
+
+
+def test_batch_generates_with_graph_depth_decoder(batch_client) -> None:
+    depth_decoder = batch_client.depth_decoder
+    active_during_generate = []
+    generate = batch_client.model.generate
+
+    def recording_generate(**kwargs):
+        active_during_generate.append(depth_decoder.active)
+        return generate(**kwargs)
+
+    batch_client.model.generate = recording_generate
+
+    response = _post_batch(batch_client, ["one", "two"])
+
+    assert response.status_code == 200
+    assert depth_decoder.bound_models == [batch_client.model]
+    assert active_during_generate == [True]
+    assert not depth_decoder.active
 
 
 def test_batch_restores_head_weights_when_generate_fails(batch_client) -> None:
@@ -472,3 +519,11 @@ def test_model_route_reports_checkpoint_facts(tmp_path, monkeypatch) -> None:
         "max_new_tokens": 1500,
         "max_batch_texts": 128,
     }
+
+
+def test_batch_graph_capture_only_for_cfg(batch_client) -> None:
+    decoder = app.state.batch_depth_decoder
+    _post_batch(batch_client, ["hello"], cfg_scale="1")
+    assert decoder.prepared_sizes == []
+    _post_batch(batch_client, ["one", "two", "three"], cfg_scale="4")
+    assert decoder.prepared_sizes == [3]

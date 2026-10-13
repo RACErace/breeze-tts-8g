@@ -25,6 +25,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.types import Receive, Scope, Send
 from transformers.generation.logits_process import LogitsProcessorList
 
+from breeze_infer.batch import BatchDepthDecoder, eager_batch_modules
 from breeze_infer.runtime import (
     load_runtime,
     resolve_device,
@@ -291,6 +292,7 @@ def _load_app(app: FastAPI, settings: ApiSettings) -> None:
     )
     update_generation_config_for_breeze(model)
     batch_head_weights = _checkpoint_head_weights(model)
+    batch_depth_decoder = BatchDepthDecoder(model, max_batch_size=MAX_BATCH_TEXTS)
 
     config = FastStreamingConfig(
         max_new_tokens=MAX_NEW_TOKENS,
@@ -317,6 +319,7 @@ def _load_app(app: FastAPI, settings: ApiSettings) -> None:
     app.state.audio_tokenizer = audio_tokenizer
     app.state.runtime = runtime
     app.state.batch_head_weights = batch_head_weights
+    app.state.batch_depth_decoder = batch_depth_decoder
 
 
 @asynccontextmanager
@@ -511,15 +514,23 @@ def _generate_batch_pcm(
         [GeneratedTokenRepetitionPenaltyLogitsProcessor(REPETITION_PENALTY)]
     )
 
-    set_all_seeds(seed)
-    with torch.inference_mode(), _swapped_weights(app.state.batch_head_weights):
-        audio = app.state.model.generate(
-            **inputs,
-            output_audio=True,
-            audio_tokenizer=app.state.audio_tokenizer,
-            logits_processor=logits_processor,
-            max_new_tokens=max_new_tokens,
-        )
+    with eager_batch_modules(app.state.model):
+        if cfg_scale != 1.0:
+            app.state.batch_depth_decoder.prepare(len(texts))
+        # Graph warmup consumes RNG; reseed after lazy capture as well as preparation.
+        set_all_seeds(seed)
+        with (
+            torch.inference_mode(),
+            _swapped_weights(app.state.batch_head_weights),
+            app.state.batch_depth_decoder.bound(app.state.model),
+        ):
+            audio = app.state.model.generate(
+                **inputs,
+                output_audio=True,
+                audio_tokenizer=app.state.audio_tokenizer,
+                logits_processor=logits_processor,
+                max_new_tokens=max_new_tokens,
+            )
 
     if len(audio) != len(texts):
         raise RuntimeError(
