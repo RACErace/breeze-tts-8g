@@ -7,6 +7,11 @@ from dataclasses import dataclass
 
 import torch
 
+from ..attention_utils import (
+    force_attention_implementation,
+    is_flash_attention_implementation,
+)
+
 
 @dataclass
 class BackbonePrefillOutput:
@@ -35,6 +40,15 @@ class BackbonePrefillGraphCache:
     def __init__(self, backbone_graph, *, token_granularity: int = 32) -> None:
         if token_granularity <= 0:
             raise ValueError("token_granularity must be > 0")
+        model_config = getattr(backbone_graph.model, "config", None)
+        if is_flash_attention_implementation(
+            getattr(model_config, "_attn_implementation", None)
+        ):
+            force_attention_implementation(backbone_graph.model, "eager")
+            print(
+                "[BackbonePrefillGraph] flash_attention_2 cannot be captured in a CUDA "
+                "graph; using eager attention for the prefill graph."
+            )
         self.backbone_graph = backbone_graph
         self.model = backbone_graph.model
         self.lm_head = backbone_graph.lm_head

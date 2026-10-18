@@ -23,6 +23,10 @@ Strategy:
 - Multi-batch bucket support: pre-capture graphs for multiple batch sizes
   (powers of 2), select the smallest fitting bucket at runtime. No recapture
   needed when batch size changes within the pre-captured range.
+
+Attention backend: the depth decoder loop is tiny (at most max_seq_len tokens)
+and every graph/batch path relies on static 3D/4D masks, so it keeps the eager
+backend even when the model is loaded with flash_attention_2.
 """
 
 import logging
@@ -34,6 +38,10 @@ import torch.nn.functional as F
 from transformers import StaticCache
 from transformers.masking_utils import create_causal_mask
 
+from ..attention_utils import (
+    force_attention_implementation,
+    is_flash_attention_implementation,
+)
 from ..logits_process import mask_invalid_codec_token_logits
 
 _log = logging.getLogger(__name__)
@@ -155,6 +163,19 @@ class DepthDecoderGraph:
             self.depth_model, "backbone_hidden_state_projector", None
         )
         self.audio_embed_size = self.depth_model.audio_embed_size
+
+        # FlashAttention has no advantage for the tiny depth-decoder loop, and its
+        # dynamic padding masks are incompatible with graph capture and the batch
+        # depth path, so this module keeps the eager backend.
+        if is_flash_attention_implementation(
+            getattr(self.depth_model.config, "_attn_implementation", None)
+        ):
+            force_attention_implementation(self.depth_model, "eager")
+            self.config._attn_implementation = "eager"
+            print(
+                "Depth decoder keeps eager attention (flash_attention_2 is only used "
+                "by the text encoder and the backbone)."
+            )
 
         # Cast codebooks_head weight to fp32 for numerical stability
         # (module forward still fires hooks, and F.linear works with fp32 input)

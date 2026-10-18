@@ -12,11 +12,24 @@ Strategy:
 - Capture single-token decode + lm_head + CFG as a CUDA graph
 - Update cache_position buffer between replays
 - Batch size changes trigger automatic recapture via ensure_batch_size()
+
+Attention backends:
+- flash_attention_2 takes a 2D boolean validity mask [batch, max_seq_len]
+  describing which KV slots are real tokens.
+- eager attention takes the classic 4D additive mask [batch, 1, 1, max_seq_len].
+Buffer construction follows the backend that the backbone is loaded with.
+The CUDA-graph path forces eager attention because FlashAttention's dynamic
+padding-mask path cannot be captured.
 """
 
 import torch
 from transformers import StaticCache
 from transformers.masking_utils import create_causal_mask
+
+from ..attention_utils import (
+    force_attention_implementation,
+    is_flash_attention_implementation,
+)
 
 
 class BackboneGraph:
@@ -105,6 +118,22 @@ class BackboneGraph:
         if batch_size <= 1:
             return batch_size
         return batch_size // 2
+
+    def _flash_attention(self) -> bool:
+        """Whether the backbone currently runs FlashAttention (2D masks)."""
+        return is_flash_attention_implementation(
+            getattr(self.model.config, "_attn_implementation", "eager")
+        )
+
+    def _use_static_mask_attention(self) -> None:
+        """Force eager attention when the CUDA-graph path needs a static model."""
+        if not self._flash_attention():
+            return
+        force_attention_implementation(self.model, "eager")
+        print(
+            "[BackboneGraph] flash_attention_2 needs dynamically unpadded inputs and "
+            "cannot be captured in a CUDA graph; using eager attention for the graph path."
+        )
 
     # ------------------------------------------------------------------
     # Buffer allocation (called from __init__ and _rebuild_for_batch)
@@ -199,11 +228,26 @@ class BackboneGraph:
                 layer.lazy_initialization(dummy_k)
 
     def _build_initial_attention_mask(self):
-        """Build a default causal mask (no padding) for graph capture/warmup.
+        """Build the decode attention mask for the active attention backend.
 
-        Uses create_causal_mask once at position 0 to determine the correct
-        shape and dtype, then allocates self.attn_mask as a static buffer.
+        FlashAttention takes a 2D boolean validity mask [batch, max_seq_len];
+        eager attention takes a 4D additive mask [batch, 1, 1, max_seq_len].
+        Both are static buffers refreshed per step by _set_attention_mask().
         """
+        if self._flash_attention():
+            self.attn_mask = torch.ones(
+                self.batch_size,
+                self.max_seq_len,
+                dtype=torch.bool,
+                device=self.device,
+            )
+            self._mask_min_val = None
+            print(
+                f"[BackboneGraph] Initial attention mask shape: {self.attn_mask.shape}, "
+                f"dtype: {self.attn_mask.dtype} (flash_attention_2 2D validity mask)"
+            )
+            return
+
         dummy = torch.zeros(
             self.batch_size, 1, self.hidden_size, dtype=self.dtype, device=self.device
         )
@@ -226,10 +270,8 @@ class BackboneGraph:
                 dtype=self.dtype,
                 device=self.device,
             )
-        elif self.attn_mask is None:
-            self.attn_mask = mask.clone()
         else:
-            self.attn_mask.copy_(mask)
+            self.attn_mask = mask.clone()
         print(
             f"[BackboneGraph] Initial attention mask shape: {self.attn_mask.shape}, dtype: {self.attn_mask.dtype}"
         )
@@ -240,14 +282,17 @@ class BackboneGraph:
         """Construct attention mask in-place from pad_lens and cache_position.
 
         For each batch i, the valid KV range is [pad_lens[i], position].
-        Everything outside is masked with -inf. Fully vectorized, no loops.
-
-        attn_mask shape: [batch, 1, 1, max_seq_len]
+        FlashAttention receives it as a 2D boolean mask; eager attention receives
+        it as a 4D additive mask with -inf outside the valid range. Fully
+        vectorized, no loops.
         """
         # kv_indices: [max_seq_len], pad_lens: [batch, 1], position: scalar
         kv = self._kv_indices  # [S]
         lo = self._pad_lens.unsqueeze(1)  # [B, 1]
         valid = (kv >= lo) & (kv <= position)  # [B, S]
+        if self._flash_attention():
+            self.attn_mask.copy_(valid)
+            return
         self.attn_mask.fill_(self._mask_min_val)
         self.attn_mask[:, 0, 0, :].masked_fill_(valid, 0.0)
 
@@ -287,6 +332,7 @@ class BackboneGraph:
     @torch.inference_mode()
     def capture(self, prefill_len=100, num_warmup=3):
         """Capture CUDA graph for single-token decode."""
+        self._use_static_mask_attention()
         print(f"Warming up backbone graph ({num_warmup} runs)...")
 
         self._init_cache_layers()

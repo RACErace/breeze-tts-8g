@@ -11,6 +11,10 @@ from typing import Any, Literal
 import numpy as np
 import torch
 
+from .attention_utils import (
+    force_attention_implementation,
+    is_flash_attention_implementation,
+)
 from .cudagraph.backbone_graph import BackboneGraph
 from .cudagraph.backbone_prefill_graph import BackbonePrefillGraphCache
 from .cudagraph.depth_decoder_graph import DepthDecoderGraph
@@ -181,6 +185,24 @@ class FastBreezeStreamingRuntime:
         self._fast_backbone_decode = self.config.stage_fast("backbone_decode")
         self._fast_depth_decoder = self.config.stage_fast("depth_decoder")
         self._fast_codec = self.config.stage_fast("codec")
+
+        # CUDA-graph backbone stages capture static 4D masks, which
+        # FlashAttention's dynamic padding-mask path cannot provide. Downgrade
+        # the backbone before any eager graph buffers are built.
+        backbone_model = getattr(self.model, "backbone_model", None)
+        backbone_config = getattr(backbone_model, "config", None)
+        if (
+            self._fast_backbone_prefill or self._fast_backbone_decode
+        ) and is_flash_attention_implementation(
+            getattr(backbone_config, "_attn_implementation", None)
+        ):
+            force_attention_implementation(backbone_model, "eager")
+            print(
+                "fast backbone graph stages require static attention masks; using "
+                "eager attention for the backbone (flash_attention_2 stays enabled "
+                "for the text encoder)."
+            )
+
         self.model._fast_text_encoder_cudagraph = self._fast_text_encoder
         self._codec_chunk_frames = 1 if self._fast_codec else 2
         self.device = _get_device(model)

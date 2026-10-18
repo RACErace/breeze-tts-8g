@@ -70,7 +70,6 @@ def main() -> None:
     tokenizer, model, audio_tokenizer = load_runtime(
         args.model,
         device=resolve_device(),
-        attn_implementation="eager",
     )
     update_generation_config_for_breeze(model)
 

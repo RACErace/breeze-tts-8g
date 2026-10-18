@@ -9,7 +9,41 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer
 
+from models.attention_utils import is_flash_attention_implementation
 from models.breeze import BreezeForConditionalGeneration
+
+DEFAULT_ATTN_IMPLEMENTATION = "flash_attention_2"
+
+
+def flash_attention_available() -> bool:
+    """Return whether the optional ``flash-attn`` package can be imported."""
+    try:
+        import flash_attn  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def resolve_attn_implementation(attn_implementation: str | None = None) -> str:
+    """Return the attention backend used for inference.
+
+    An explicit choice always wins. Otherwise prefer FlashAttention-2 when the
+    package is installed and fall back to eager, so a plain
+    ``pip install -r requirements.txt`` (which does not include flash-attn)
+    still runs.
+    """
+    if attn_implementation is not None:
+        if (
+            is_flash_attention_implementation(attn_implementation)
+            and not flash_attention_available()
+        ):
+            raise ImportError(
+                f"attn_implementation={attn_implementation!r} requires the flash-attn package"
+            )
+        return attn_implementation
+    if flash_attention_available():
+        return DEFAULT_ATTN_IMPLEMENTATION
+    return "eager"
 
 
 def get_dist_info() -> tuple[int, int, int]:
@@ -69,8 +103,11 @@ def load_runtime(
     ckpt_dir: Path,
     *,
     device: str,
-    attn_implementation: str,
+    attn_implementation: str | None = None,
 ) -> tuple[AutoTokenizer, BreezeForConditionalGeneration, Any]:
+
+    attn_implementation = resolve_attn_implementation(attn_implementation)
+    print(f"attention implementation: {attn_implementation}", flush=True)
 
     if device.startswith("cuda"):
         try:

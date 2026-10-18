@@ -43,6 +43,7 @@ Breeze TTS 2 is an open-weight text-to-speech model built for real-time interact
 - A CUDA-capable NVIDIA GPU
 - GPU memory: approximately 7.7 GiB for eager inference or 14.4 GiB with `--fast-all`; use a 12 GB GPU for eager or a 24 GB GPU for the fast path
 - The Breeze TTS 2 checkpoint
+- Optional: `flash-attn` for FlashAttention-2 attention kernels; the runtime uses them automatically when the package is importable
 
 ### Installation
 
@@ -60,6 +61,13 @@ python -m pip install -r requirements.txt
 ```
 
 All required model components are included in the Breeze TTS 2 checkpoint.
+
+Attention backend: when `flash-attn` is installed, the text encoder and backbone
+load with `flash_attention_2`; otherwise the runtime falls back to eager
+attention. The CUDA-graph fast stages and the small depth decoder keep their
+previous static-mask (eager/SDPA) backends, because FlashAttention's dynamic
+padding masks cannot be captured in a CUDA graph and are not worthwhile for the
+short depth-decoder sequences.
 
 For the tested CUDA environment, build the included Docker image:
 
@@ -143,7 +151,7 @@ python infer.py ../breeze-tts-2 \
 
 ### 🌐 Streaming API
 
-Start the single-concurrency streaming API. It uses the same PyTorch runtime and eager execution by default:
+Start the single-concurrency streaming API. It uses the same PyTorch runtime and eager execution by default, with FlashAttention-2 for the text encoder and backbone when `flash-attn` is installed:
 
 ```bash
 python -m breeze_infer.api ../breeze-tts-2 --host 0.0.0.0 --port 7860
@@ -216,6 +224,13 @@ Both the CLI and API use eager streaming by default and skip graph warmup. Pass 
 | Codec | `--[no-]fast-codec` | Eager streaming decode | Single-request streaming CUDA Graph with one-frame chunks |
 
 Individual stage flags are intended for profiling and debugging.
+
+Flash attention is used by the eager streaming path (text encoder and backbone,
+including token-by-token backbone decode). CUDA-graph stages keep their
+static-mask backends because FlashAttention's padding-mask path unpads
+dynamically and cannot be captured, and the depth decoder keeps eager attention
+because its sequences are only `max_seq_len` tokens long, where FlashAttention
+offers no advantage.
 
 
 ## License and Responsible Use

@@ -288,7 +288,6 @@ def _load_app(app: FastAPI, settings: ApiSettings) -> None:
     tokenizer, model, audio_tokenizer = load_runtime(
         settings.model,
         device=resolve_device(),
-        attn_implementation="eager",
     )
     update_generation_config_for_breeze(model)
     batch_head_weights = _checkpoint_head_weights(model)
