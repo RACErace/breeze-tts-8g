@@ -225,6 +225,22 @@ Both the CLI and API use eager streaming by default and skip graph warmup. Pass 
 
 Individual stage flags are intended for profiling and debugging.
 
+`--max-seq-len` (default 2048) sets the context budget shared by the prompt and
+the generated frames, so it also caps generated audio length (12.5 frames per
+second). Lower it when GPU memory is tight. On an 8 GB GPU the depth-decoder
+and codec graph stages are the ones that fit; keep the context at 1024:
+
+```bash
+python infer.py ../breeze-tts-2 \
+  --text "..." \
+  --max-seq-len 1024 --fast-depth-decoder --fast-codec
+```
+
+The depth-decoder and codec graph stages compile kernels with `torch.compile`,
+so they need a working C compiler (`build-essential` on Ubuntu) in the runtime
+environment. Set `TORCHINDUCTOR_CACHE_DIR` to a persistent directory to reuse
+the compiled kernels across restarts.
+
 Flash attention is used by the eager streaming path (text encoder and backbone,
 including token-by-token backbone decode). CUDA-graph stages keep their
 static-mask backends because FlashAttention's padding-mask path unpads

@@ -63,6 +63,7 @@ class ApiSettings:
     fast_depth_decoder: bool
     fast_codec: bool
     model_info: dict[str, float | str | int]
+    max_seq_len: int = MAX_SEQ_LEN
 
 
 _settings: ApiSettings | None = None
@@ -295,7 +296,7 @@ def _load_app(app: FastAPI, settings: ApiSettings) -> None:
 
     config = FastStreamingConfig(
         max_new_tokens=MAX_NEW_TOKENS,
-        max_seq_len=MAX_SEQ_LEN,
+        max_seq_len=settings.max_seq_len,
         fast_all=settings.fast_all,
         fast_text_encoder=settings.fast_text_encoder,
         fast_backbone_prefill=settings.fast_backbone_prefill,
@@ -663,7 +664,18 @@ def main() -> None:
     parser.add_argument(
         "--fast-codec", action=argparse.BooleanOptionalAction, default=False
     )
+    parser.add_argument(
+        "--max-seq-len",
+        type=int,
+        default=MAX_SEQ_LEN,
+        help=(
+            "Maximum context length (prompt + generated frames). Lower it to fit "
+            "CUDA-graph fast stages on smaller GPUs."
+        ),
+    )
     args = parser.parse_args()
+    if args.max_seq_len < 2:
+        parser.error("--max-seq-len must be at least 2")
     try:
         model_dir = resolve_model_dir(args.model, args.revision)
     except ModelResolutionError as exc:
@@ -679,6 +691,7 @@ def main() -> None:
         fast_depth_decoder=args.fast_depth_decoder,
         fast_codec=args.fast_codec,
         model_info=build_model_info(model_dir),
+        max_seq_len=args.max_seq_len,
     )
 
     import uvicorn

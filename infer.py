@@ -38,6 +38,15 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--cfg-scale", type=float, default=DEFAULT_CFG_SCALE)
     parser.add_argument(
+        "--max-seq-len",
+        type=int,
+        default=MAX_SEQ_LEN,
+        help=(
+            "Maximum context length (prompt + generated frames). Lower it to fit "
+            "CUDA-graph fast stages on smaller GPUs."
+        ),
+    )
+    parser.add_argument(
         "--fast-all", action=argparse.BooleanOptionalAction, default=None
     )
     parser.add_argument(
@@ -59,6 +68,8 @@ def main() -> None:
 
     if not math.isfinite(args.cfg_scale) or args.cfg_scale <= 0:
         raise ValueError("--cfg-scale must be greater than 0")
+    if args.max_seq_len < 2:
+        raise ValueError("--max-seq-len must be at least 2")
 
     has_ref_audio = args.ref_audio is not None
     has_ref_text = bool(args.ref_text and args.ref_text.strip())
@@ -75,7 +86,7 @@ def main() -> None:
 
     config = FastStreamingConfig(
         max_new_tokens=MAX_NEW_TOKENS,
-        max_seq_len=MAX_SEQ_LEN,
+        max_seq_len=args.max_seq_len,
         fast_all=args.fast_all,
         fast_text_encoder=args.fast_text_encoder,
         fast_backbone_prefill=args.fast_backbone_prefill,
