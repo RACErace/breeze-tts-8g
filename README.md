@@ -243,6 +243,13 @@ checkpoint precision. A 1024-token context with these stages and the fp16 codec
 peaks at about 7.4 GiB instead of 7.8 GiB, staying below the 8 GiB paging
 threshold of a laptop GPU.
 
+MLP projections in the backbone and depth decoder additionally run with
+weight-only int8 kernels (`--int8-linears`, on by default): per-output-channel
+int8 weights with a Triton GEMM that dequantizes tiles into bf16 and uses tensor
+cores. On the tiny decode batches these GEMMs are weight-bandwidth bound, so
+this cuts the per-frame cost of both stacks and frees about 1.3 GiB of VRAM.
+Pass `--no-int8-linears` to keep the checkpoint weights in bf16.
+
 The depth-decoder and codec graph stages compile kernels with `torch.compile`,
 so they need a working C compiler (`build-essential` on Ubuntu) in the runtime
 environment. Set `TORCHINDUCTOR_CACHE_DIR` to a persistent directory to reuse

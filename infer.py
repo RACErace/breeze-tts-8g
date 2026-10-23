@@ -64,6 +64,15 @@ def main() -> None:
     parser.add_argument(
         "--fast-codec", action=argparse.BooleanOptionalAction, default=False
     )
+    parser.add_argument(
+        "--int8-linears",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Run MLP projections with weight-only int8 kernels (smaller and "
+            "faster on memory-bound decode)."
+        ),
+    )
     args = parser.parse_args()
 
     if not math.isfinite(args.cfg_scale) or args.cfg_scale <= 0:
@@ -93,6 +102,7 @@ def main() -> None:
         fast_backbone_decode=args.fast_backbone_decode,
         fast_depth_decoder=args.fast_depth_decoder,
         fast_codec=args.fast_codec,
+        int8_linears=args.int8_linears,
         repetition_penalty=REPETITION_PENALTY,
     )
     runtime = FastBreezeStreamingRuntime(

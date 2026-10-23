@@ -52,6 +52,7 @@ class FastStreamingConfig:
     depth_max_top_k: int = 1024
     codec_dtype: str | None = "fp16"
     backbone_graph_attention: str = "sdpa"
+    int8_linears: bool = True
 
     def stage_fast(self, stage: str) -> bool:
         """Resolve the master switch before the per-stage setting."""
@@ -244,6 +245,16 @@ class FastBreezeStreamingRuntime:
                 )
             codec_module.to(self._codec_dtype)
             print(f"codec dtype: {self._codec_dtype}", flush=True)
+        if self.config.int8_linears:
+            from .int8_linear import quantize_mlp_linears
+
+            quantized = quantize_mlp_linears(backbone_model)
+            if quantized:
+                print(
+                    f"backbone: quantized {quantized} MLP linears to int8",
+                    flush=True,
+                )
+                torch.cuda.empty_cache()
 
     @staticmethod
     def _resolve_codec_dtype(name: str | None):
@@ -338,6 +349,7 @@ class FastBreezeStreamingRuntime:
                 batch_size=depth_bucket_sizes[0],
                 bucket_sizes=depth_bucket_sizes,
                 max_top_k=self.config.depth_max_top_k,
+                int8_linears=self.config.int8_linears,
                 **depth_params,
             )
             if self._fast_depth_decoder:

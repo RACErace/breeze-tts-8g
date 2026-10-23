@@ -64,6 +64,7 @@ class ApiSettings:
     fast_codec: bool
     model_info: dict[str, float | str | int]
     max_seq_len: int = MAX_SEQ_LEN
+    int8_linears: bool = True
 
 
 _settings: ApiSettings | None = None
@@ -303,6 +304,7 @@ def _load_app(app: FastAPI, settings: ApiSettings) -> None:
         fast_backbone_decode=settings.fast_backbone_decode,
         fast_depth_decoder=settings.fast_depth_decoder,
         fast_codec=settings.fast_codec,
+        int8_linears=settings.int8_linears,
         repetition_penalty=REPETITION_PENALTY,
     )
     runtime = FastBreezeStreamingRuntime(
@@ -673,6 +675,12 @@ def main() -> None:
             "CUDA-graph fast stages on smaller GPUs."
         ),
     )
+    parser.add_argument(
+        "--int8-linears",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run MLP projections with weight-only int8 kernels.",
+    )
     args = parser.parse_args()
     if args.max_seq_len < 2:
         parser.error("--max-seq-len must be at least 2")
@@ -692,6 +700,7 @@ def main() -> None:
         fast_codec=args.fast_codec,
         model_info=build_model_info(model_dir),
         max_seq_len=args.max_seq_len,
+        int8_linears=args.int8_linears,
     )
 
     import uvicorn

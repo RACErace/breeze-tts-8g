@@ -118,6 +118,7 @@ class DepthDecoderGraph:
         batch_size=2,
         bucket_sizes: list[int] | None = None,
         max_top_k: int = 1024,
+        int8_linears: bool = False,
     ):
         self.device = device
         self.dtype = dtype
@@ -177,6 +178,19 @@ class DepthDecoderGraph:
                 "Depth decoder keeps eager attention (flash_attention_2 is only used "
                 "by the text encoder and the backbone)."
             )
+
+        # Weight-only int8 MLP projections: for the tiny depth-decoder batch the
+        # MLP GEMMs are weight-bandwidth bound, so int8 roughly halves them.
+        if int8_linears:
+            from ..int8_linear import quantize_mlp_linears
+
+            quantized = quantize_mlp_linears(self.depth_model)
+            if quantized:
+                print(
+                    f"Depth decoder: quantized {quantized} MLP linears to int8",
+                    flush=True,
+                )
+                torch.cuda.empty_cache()
 
         # Cast codebooks_head weight to fp32 for numerical stability
         # (module forward still fires hooks, and F.linear works with fp32 input)
