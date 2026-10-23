@@ -8,6 +8,7 @@ the kernel dequantizes tiles to bf16 and uses tensor cores for the dot product.
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 import torch
@@ -67,19 +68,31 @@ def quantize_weight(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     return q.t().contiguous(), scale.float().contiguous()
 
 
+def _tuned_launch_config(k: int) -> tuple[int, int, int, int]:
+    """Block shape / occupancy tuned per reduction size (measured on RTX 4060).
+
+    Long-K projections (the MLP down projections) reach ~200 GB/s with a wider
+    K tile and a third pipeline stage; gate/up projections are fastest with the
+    flatter default tile.
+    """
+    if os.environ.get("BREEZE_INT8_TUNED", "1") == "0":
+        return 64, 64, 4, 3
+    if k >= 4096:
+        return 64, 256, 4, 3
+    return 64, 64, 4, 2
+
+
 def _launch_int8_gemm(
     x: torch.Tensor,
     qweight_t: torch.Tensor,
     scales: torch.Tensor,
     bias: Optional[torch.Tensor],
-    block_n: int = 64,
-    block_k: int = 64,
-    block_m: int = 16,
 ) -> torch.Tensor:
     M, K = x.shape
     N = qweight_t.shape[1]
+    block_n, block_k, num_warps, num_stages = _tuned_launch_config(K)
     out = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
-    grid = (triton.cdiv(M, block_m), triton.cdiv(N, block_n))
+    grid = (triton.cdiv(M, 16), triton.cdiv(N, block_n))
     _int8_weight_gemm[grid](
         x,
         qweight_t,
@@ -88,9 +101,11 @@ def _launch_int8_gemm(
         M,
         K,
         N,
-        BLOCK_M=block_m,
+        BLOCK_M=16,
         BLOCK_N=block_n,
         BLOCK_K=block_k,
+        num_warps=num_warps,
+        num_stages=num_stages,
     )
     if bias is not None:
         out = out + bias
@@ -120,9 +135,6 @@ class Int8Linear(nn.Module):
         self,
         weight: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
-        *,
-        block_n: int = 64,
-        block_k: int = 64,
     ) -> None:
         super().__init__()
         qweight_t, scales = quantize_weight(weight.detach())
@@ -134,8 +146,6 @@ class Int8Linear(nn.Module):
             self.bias = None
         self.in_features = int(weight.shape[1])
         self.out_features = int(weight.shape[0])
-        self.block_n = int(block_n)
-        self.block_k = int(block_k)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dtype != torch.bfloat16 or x.shape[-1] != self.in_features:
@@ -157,8 +167,8 @@ def quantize_mlp_linears(model) -> int:
     """Replace gate/up/down projections of every decoder layer's MLP with int8.
 
     Only the large MLP projections are quantized: for the tiny-batch decode
-    shapes they are 1.4-1.9x faster than bf16, while the small QKV/O projections
-    are faster in bf16.
+    shapes they are faster than bf16, while the small QKV/O projections are
+    faster in bf16.
     """
     replaced = 0
     for layer in getattr(model, "layers", ()) or ():
