@@ -48,6 +48,10 @@ class FastStreamingConfig:
     top_p: float | None = None
     do_sample: bool | None = None
     repetition_penalty: float = 1.1
+    codec_chunk_frames: int | None = None
+    depth_max_top_k: int = 1024
+    codec_dtype: str | None = "fp16"
+    backbone_graph_attention: str = "sdpa"
 
     def stage_fast(self, stage: str) -> bool:
         """Resolve the master switch before the per-stage setting."""
@@ -186,27 +190,32 @@ class FastBreezeStreamingRuntime:
         self._fast_depth_decoder = self.config.stage_fast("depth_decoder")
         self._fast_codec = self.config.stage_fast("codec")
 
-        # CUDA-graph backbone stages capture static 4D masks, which
-        # FlashAttention's dynamic padding-mask path cannot provide. Downgrade
-        # the backbone before any eager graph buffers are built.
+        # FlashAttention cannot provide the static 4D masks required by the
+        # backbone prefill graph. The decode graph switches itself to the
+        # configured graph backend (SDPA by default) during capture.
         backbone_model = getattr(self.model, "backbone_model", None)
         backbone_config = getattr(backbone_model, "config", None)
-        if (
-            self._fast_backbone_prefill or self._fast_backbone_decode
-        ) and is_flash_attention_implementation(
-            getattr(backbone_config, "_attn_implementation", None)
-        ):
-            force_attention_implementation(backbone_model, "eager")
-            print(
-                "fast backbone graph stages require static attention masks; using "
-                "eager attention for the backbone (flash_attention_2 stays enabled "
-                "for the text encoder)."
-            )
+        if self._fast_backbone_prefill and not self._fast_backbone_decode:
+            if is_flash_attention_implementation(
+                getattr(backbone_config, "_attn_implementation", None)
+            ):
+                force_attention_implementation(backbone_model, "eager")
+                print(
+                    "fast backbone prefill graph requires static attention masks; "
+                    "using eager attention for the backbone."
+                )
 
         self.model._fast_text_encoder_cudagraph = self._fast_text_encoder
-        self._codec_chunk_frames = 1 if self._fast_codec else 2
+        if self.config.codec_chunk_frames is not None and self.config.codec_chunk_frames <= 0:
+            raise ValueError("codec_chunk_frames must be positive")
+        self._codec_chunk_frames = (
+            self.config.codec_chunk_frames
+            if self.config.codec_chunk_frames is not None
+            else (1 if self._fast_codec else 2)
+        )
         self.device = _get_device(model)
         self.dtype = _get_dtype(model)
+        self._codec_dtype = self._resolve_codec_dtype(self.config.codec_dtype)
         self._backbone_graph: BackboneGraph | None = None
         self._backbone_graphs: dict[int, BackboneGraph] = {}
         self._backbone_prefill_graph: BackbonePrefillGraphCache | None = None
@@ -225,6 +234,32 @@ class FastBreezeStreamingRuntime:
             raise RuntimeError("fast streaming requires a CUDA device")
         if self.config.repetition_penalty <= 0:
             raise ValueError("repetition_penalty must be > 0")
+        if self._codec_dtype is not None:
+            # The codec runs fp32 convolutions by default; bf16 roughly halves
+            # its memory traffic and is a large end-to-end win on 8 GB GPUs.
+            codec_module = getattr(self.audio_tokenizer, "model", None)
+            if codec_module is None:
+                raise RuntimeError(
+                    "audio_tokenizer.model is required to cast the codec dtype"
+                )
+            codec_module.to(self._codec_dtype)
+            print(f"codec dtype: {self._codec_dtype}", flush=True)
+
+    @staticmethod
+    def _resolve_codec_dtype(name: str | None):
+        if name is None or name in ("auto", "keep"):
+            return None
+        mapping = {
+            "bf16": torch.bfloat16,
+            "fp16": torch.float16,
+            "fp32": torch.float32,
+            "float32": torch.float32,
+        }
+        if name not in mapping:
+            raise ValueError(
+                f"unsupported codec_dtype {name!r}; use bf16, fp16, fp32 or None"
+            )
+        return mapping[name]
 
     @property
     def sample_rate(self) -> int:
@@ -273,6 +308,7 @@ class FastBreezeStreamingRuntime:
                 max_seq_len=self.config.max_seq_len,
                 guidance_scale=guidance_scale,
                 batch_size=branch_batch_size,
+                graph_attention=self.config.backbone_graph_attention,
             )
             if self._fast_backbone_decode:
                 backbone_graph.capture()
@@ -301,6 +337,7 @@ class FastBreezeStreamingRuntime:
                 fast=self._fast_depth_decoder,
                 batch_size=depth_bucket_sizes[0],
                 bucket_sizes=depth_bucket_sizes,
+                max_top_k=self.config.depth_max_top_k,
                 **depth_params,
             )
             if self._fast_depth_decoder:

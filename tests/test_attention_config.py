@@ -149,7 +149,7 @@ def test_backbone_graph_eager_decode_mask_stays_additive_4d() -> None:
     assert (graph.attn_mask == torch.finfo(torch.float32).min).sum().item() == 8
 
 
-def test_backbone_graph_capture_falls_back_to_eager_for_flash() -> None:
+def test_backbone_graph_capture_uses_configured_graph_attention() -> None:
     layer_config = SimpleNamespace(_attn_implementation="flash_attention_2")
     graph = BackboneGraph.__new__(BackboneGraph)
     graph.model = SimpleNamespace(
@@ -160,8 +160,33 @@ def test_backbone_graph_capture_falls_back_to_eager_for_flash() -> None:
             )
         ],
     )
+    graph.graph_attention = "sdpa"
+
+    graph._use_static_mask_attention()
+
+    assert graph.model.config._attn_implementation == "sdpa"
+    assert layer_config._attn_implementation == "sdpa"
+
+
+def test_backbone_graph_capture_can_force_eager_attention() -> None:
+    layer_config = SimpleNamespace(_attn_implementation="flash_attention_2")
+    graph = BackboneGraph.__new__(BackboneGraph)
+    graph.model = SimpleNamespace(
+        config=SimpleNamespace(_attn_implementation="flash_attention_2"),
+        layers=[
+            SimpleNamespace(
+                self_attn=SimpleNamespace(config=layer_config),
+            )
+        ],
+    )
+    graph.graph_attention = "eager"
 
     graph._use_static_mask_attention()
 
     assert graph.model.config._attn_implementation == "eager"
     assert layer_config._attn_implementation == "eager"
+
+
+def test_backbone_graph_rejects_unknown_graph_attention() -> None:
+    with pytest.raises(ValueError, match="graph_attention"):
+        BackboneGraph(None, None, None, None, graph_attention="flash_attention_2")

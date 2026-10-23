@@ -117,6 +117,7 @@ class DepthDecoderGraph:
         debug: bool = False,
         batch_size=2,
         bucket_sizes: list[int] | None = None,
+        max_top_k: int = 1024,
     ):
         self.device = device
         self.dtype = dtype
@@ -220,7 +221,10 @@ class DepthDecoderGraph:
         # Fixed MAX_K workspace for graph-safe top_k.
         # top_k_buf can be set to any value in [1, _max_k] at runtime without recapture.
         # Default 1024 so users can freely adjust top_k up to 1024.
-        self._max_k = min(1024, self.vocab_size)
+        self._max_k = min(max(1, int(max_top_k)), self.vocab_size)
+        # Top-p filtering uses a full vocabulary sort; it is only captured when the
+        # configured sampling actually needs it (top_p < 1).
+        self._top_p_active = float(top_p) < 1.0
         self._topk_ranks = torch.arange(
             self._max_k, device=device
         )  # pre-alloc, never recreated
@@ -283,11 +287,22 @@ class DepthDecoderGraph:
             self.top_k_buf.copy_(v.view(self.half, 1))
 
     def set_top_p(self, v):
-        """v: scalar float (broadcast) or [half] / [half,1] tensor (per-sample)."""
-        if isinstance(v, (int, float)):
-            self.top_p_buf.fill_(v)
-        else:
+        """v: scalar float (broadcast) or [half] / [half,1] tensor (per-sample).
+
+        The graph is captured with top-p filtering only when the graph was
+        created with ``top_p < 1``. Raising top_p to 1.0 is always allowed.
+        """
+        value = float(v) if isinstance(v, (int, float)) else float(v.max())
+        if value < 1.0:
+            if not self._top_p_active:
+                raise RuntimeError(
+                    "top_p < 1 requires a depth decoder graph captured with top_p < 1"
+                )
+        elif not self._top_p_active:
+            return
+        self.top_p_buf.fill_(value) if isinstance(v, (int, float)) else (
             self.top_p_buf.copy_(v.view(self.half, 1))
+        )
 
     def set_do_sample(self, v):
         """v: scalar bool (broadcast) or [half] long tensor (per-sample, 0/1)."""
@@ -544,18 +559,21 @@ class DepthDecoderGraph:
         scaled = torch.full_like(scaled, float("-inf")).scatter_(1, topk_idx, topk_vals)
 
         # top_p on raw logits (HF-style: softmax -> cumsum -> mask -> apply to raw logits)
-        sorted_logits, sorted_idx = torch.sort(scaled, descending=True)  # [half, vocab]
-        cumprobs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-        remove = cumprobs > self.top_p_buf
-        remove = F.pad(
-            remove[..., :-1], (1, 0), value=False
-        )  # shift right, first always kept
-        sorted_logits = torch.where(
-            remove, torch.full_like(sorted_logits, float("-inf")), sorted_logits
-        )
-        scaled = torch.full_like(scaled, float("-inf")).scatter_(
-            1, sorted_idx, sorted_logits
-        )
+        if self._top_p_active:
+            sorted_logits, sorted_idx = torch.sort(
+                scaled, descending=True
+            )  # [half, vocab]
+            cumprobs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+            remove = cumprobs > self.top_p_buf
+            remove = F.pad(
+                remove[..., :-1], (1, 0), value=False
+            )  # shift right, first always kept
+            sorted_logits = torch.where(
+                remove, torch.full_like(sorted_logits, float("-inf")), sorted_logits
+            )
+            scaled = torch.full_like(scaled, float("-inf")).scatter_(
+                1, sorted_idx, sorted_logits
+            )
 
         # softmax -> multinomial (same as HF _sample)
         probs = F.softmax(scaled, dim=-1)

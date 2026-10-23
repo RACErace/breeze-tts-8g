@@ -58,10 +58,16 @@ class BackboneGraph:
         guidance_scale=3.0,
         debug: bool = False,
         batch_size: int = 1,
+        graph_attention: str = "sdpa",
     ):
+        if graph_attention not in ("eager", "sdpa"):
+            raise ValueError(
+                f"graph_attention must be 'eager' or 'sdpa', got {graph_attention!r}"
+            )
         self.device = device
         self.dtype = dtype
         self.debug = debug
+        self.graph_attention = graph_attention
         self.no_graph = (
             False  # runtime flag: True = skip graph replay (for layer-diff hooks)
         )
@@ -126,13 +132,21 @@ class BackboneGraph:
         )
 
     def _use_static_mask_attention(self) -> None:
-        """Force eager attention when the CUDA-graph path needs a static model."""
-        if not self._flash_attention():
+        """Switch the decode graph to a CUDA-graph-capturable attention backend.
+
+        FlashAttention unpads dynamically (host-side shapes), so it cannot be
+        captured. ``graph_attention`` selects the backend used inside the graph;
+        SDPA is the default because it is much faster than eager for the
+        single-token decode step.
+        """
+        target = self.graph_attention
+        current = getattr(self.model.config, "_attn_implementation", "eager")
+        if current == target:
             return
-        force_attention_implementation(self.model, "eager")
+        force_attention_implementation(self.model, target)
         print(
-            "[BackboneGraph] flash_attention_2 needs dynamically unpadded inputs and "
-            "cannot be captured in a CUDA graph; using eager attention for the graph path."
+            f"[BackboneGraph] backbone decode graph uses {target} attention "
+            f"(was {current}); flash_attention_2 cannot be captured."
         )
 
     # ------------------------------------------------------------------
