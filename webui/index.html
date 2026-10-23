@@ -1,0 +1,1652 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Breeze TTS 2 · 语音合成台</title>
+<style>
+  :root {
+    --body: #26241f;
+    --window: #211f1b;
+    --bone: #e4dfd2;
+    --bone-2: #dad4c4;
+    --paper: #f2efe6;
+    --ink: #1b1a16;
+    --ink-2: #4c483f;
+    --muted: #8b8577;
+    --line-bone: #c3bcaa;
+    --line-dark: #3d382e;
+    --dark-text: #e8e2d3;
+    --dark-muted: #9a9382;
+    --red: #c2181c;
+    --red-dim: #7e1417;
+    --mono: "Cascadia Mono", Consolas, "SF Mono", "Roboto Mono", ui-monospace, monospace;
+    --sans: "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: var(--body);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
+
+  .app {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 54px minmax(0, 1fr) 38px;
+  }
+
+  /* ---------- header ---------- */
+  .masthead {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    padding: 0 20px;
+    background: var(--bone);
+    border-bottom: 1px solid var(--ink);
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+  .brand-name {
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .brand-name::after {
+    content: "";
+    display: inline-block;
+    width: 7px; height: 7px;
+    margin-left: 8px;
+    background: var(--red);
+  }
+  .brand-sub { font-size: 12px; color: var(--ink-2); }
+
+  .modes { display: flex; gap: 0; flex-wrap: wrap; margin-left: 0; }
+  .tab {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--ink);
+    border-right: none;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: var(--ink);
+    transition: background 80ms linear, color 80ms linear;
+  }
+  .tab:last-child { border-right: 1px solid var(--ink); }
+  .tab:hover { background: var(--bone-2); }
+  .tab.active { background: var(--ink); color: var(--bone); }
+  .tab:focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }
+  .param.mode-row { grid-template-columns: 92px minmax(0, 1fr); }
+  .param.mode-row .modes { width: 100%; }
+  .param.mode-row .tab {
+    flex: 1 1 0;
+    min-width: 66px;
+    padding: 5px 8px;
+    font-size: 12px;
+    text-align: center;
+  }
+  .param.subfield {
+    grid-template-columns: 92px minmax(0, 1fr);
+    align-items: start;
+  }
+  .param.subfield > label,
+  .param.subfield > .param-label {
+    padding-top: 6px;
+    white-space: normal;
+    line-height: 1.35;
+  }
+  .subfield-body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .subfield-body textarea { width: 100%; }
+  .sublabel { font-size: 12px; color: var(--ink-2); }
+
+  .readout {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .rec-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #bdb6a6;
+    box-shadow: none;
+  }
+  .rec-dot.live { background: var(--red); animation: blink 1s steps(2, start) infinite; }
+  .rec-label { color: var(--red); font-weight: 700; }
+  @keyframes blink { 50% { opacity: 0.25; } }
+
+  /* ---------- deck ---------- */
+  .deck {
+    display: grid;
+    grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
+    min-height: 0;
+  }
+
+  /* control bay */
+  .bay {
+    background: var(--bone);
+    border-right: 1px solid var(--ink);
+    padding: 18px 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    overflow: auto;
+  }
+  .field-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+  .field-head label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-2);
+    letter-spacing: 0.02em;
+  }
+  .counter, .hint-inline {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+  textarea, input[type="number"] {
+    width: 100%;
+    background: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 0;
+    padding: 9px 11px;
+    color: var(--ink);
+    resize: vertical;
+    outline: none;
+  }
+  textarea::placeholder { color: #a8a294; }
+  textarea:focus, input[type="number"]:focus, input[type="file"]:focus-visible {
+    outline: 2px solid var(--red);
+    outline-offset: -1px;
+  }
+  .field.grow { display: flex; flex-direction: column; flex: 0 0 auto; min-height: 0; }
+  #text { flex: none; height: clamp(180px, 30vh, 400px); min-height: 0; font-size: 15px; line-height: 1.65; }
+
+  .events { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .events-label { font-size: 12px; color: var(--ink-2); }
+  .sep { color: var(--line-bone); }
+  .ev {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--line-bone);
+    padding: 2px 7px;
+    font-size: 12px;
+    color: var(--ink-2);
+    transition: background 80ms linear, color 80ms linear, border-color 80ms linear;
+  }
+  .ev:hover { border-color: var(--ink); color: var(--ink); }
+  .ev.en { font-family: var(--mono); font-size: 11px; }
+
+  .file-row { display: flex; align-items: center; gap: 10px; }
+  .file-btn {
+    display: inline-block;
+    border: 1px solid var(--ink);
+    padding: 5px 12px;
+    font-size: 12px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .file-btn:hover { background: var(--ink); color: var(--bone); }
+  input[type="file"] {
+    position: absolute;
+    width: 1px; height: 1px;
+    opacity: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .file-name {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  audio { width: 100%; height: 32px; margin-top: 8px; accent-color: var(--red); }
+
+  /* parameter block: ruled rows */
+  .params { border-top: 1px solid var(--line-bone); }
+  .param {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line-bone);
+  }
+  .param > label, .param .param-label, .param .check {
+    font-size: 12px;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .param .check { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+  .param .check input { accent-color: var(--red); width: 14px; height: 14px; }
+  .param input[type="number"] {
+    width: 84px;
+    padding: 4px 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    justify-self: start;
+  }
+  .param input[type="range"] {
+    width: 100%;
+    max-width: 220px;
+    accent-color: var(--red);
+    background: transparent;
+  }
+  .param output {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink);
+    min-width: 30px;
+    text-align: right;
+    justify-self: end;
+  }
+  .mini {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--ink);
+    padding: 3px 9px;
+    font-size: 11px;
+    color: var(--ink);
+  }
+  .mini:hover { background: var(--ink); color: var(--bone); }
+
+  .hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    min-height: 18px;
+  }
+
+  /* tape window */
+  .transport-deck {
+    background: var(--body);
+    display: flex;
+    flex-direction: column;
+    padding: 18px 20px 16px;
+    gap: 12px;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .window {
+    background: var(--window);
+    border: 1px solid var(--line-dark);
+    padding: 14px 16px 12px;
+  }
+  .reels {
+    position: relative;
+    height: 112px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px;
+  }
+  .tape-line {
+    position: absolute;
+    left: 106px; right: 106px; top: 50%;
+    height: 1px;
+    background: #4b453a;
+  }
+  .reel {
+    position: relative;
+    width: 82px; height: 82px;
+    border-radius: 50%;
+    border: 1px solid #5c5648;
+    background:
+      repeating-conic-gradient(from 0deg, #4b453a 0deg 7deg, transparent 7deg 60deg);
+    display: grid;
+    place-items: center;
+    animation: reelspin 2.6s linear infinite;
+    animation-play-state: paused;
+  }
+  .reel::after {
+    content: "";
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    border: 1px solid #6d6656;
+    background: var(--window);
+  }
+  .run .reel { animation-play-state: running; }
+  .run .reel.right { animation-direction: reverse; }
+  @keyframes reelspin { to { transform: rotate(360deg); } }
+
+  .counter-row {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line-dark);
+    font-family: var(--mono);
+    color: var(--dark-text);
+  }
+  .take { font-size: 12px; color: var(--dark-muted); }
+  .take b { color: var(--dark-text); font-weight: 600; }
+  .timecode {
+    font-size: 26px;
+    letter-spacing: 0.04em;
+    line-height: 1;
+  }
+  .sample-rate { margin-left: auto; font-size: 12px; color: var(--dark-muted); }
+
+  #meter {
+    width: 100%;
+    flex: 0 0 auto;
+    height: clamp(160px, 22vh, 300px);
+    min-height: 0;
+    display: block;
+    background: var(--window);
+    border: 1px solid var(--line-dark);
+  }
+
+  .vu-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    border: 1px solid var(--line-dark);
+    background: var(--window);
+    padding: 8px 14px;
+  }
+  .vu-dial { width: 128px; height: 54px; display: block; overflow: visible; }
+  .vu-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dark-muted);
+  }
+  .vu-db {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--dark-text);
+    min-width: 82px;
+    text-align: right;
+  }
+
+  .bay-actions {
+    display: flex;
+    margin-top: auto;
+    padding-top: 8px;
+  }
+  .bay-actions .btn {
+    min-width: 160px;
+    justify-content: center;
+    padding: 10px 18px;
+  }
+  .bay-actions .btn:not(.primary) {
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+  .bay-actions .btn:not(.primary):hover:not(:disabled) {
+    background: var(--ink);
+    color: var(--bone);
+  }
+  .btn {
+    appearance: none;
+    border: 1px solid var(--dark-text);
+    background: transparent;
+    color: var(--dark-text);
+    padding: 9px 16px;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 80ms linear, color 80ms linear, border-color 80ms linear;
+  }
+  .btn:hover:not(:disabled) { background: var(--dark-text); color: var(--window); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn .glyph { font-family: var(--mono); font-size: 12px; }
+  .btn.primary {
+    background: var(--red);
+    border-color: var(--red);
+    color: #fff;
+    font-weight: 600;
+  }
+  .btn.primary:hover:not(:disabled) { background: #a01418; border-color: #a01418; color: #fff; }
+  .btn:focus-visible { outline: 2px solid var(--dark-text); outline-offset: 1px; }
+
+  .stats {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--dark-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-height: 18px;
+  }
+  .stats.ok { color: #cfe3b0; }
+  .stats.err { color: #ff8a84; }
+
+  /* generated-take log */
+  .take-log {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin-top: 2px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line-dark);
+  }
+  .take-log-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 2px 6px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--dark-muted);
+  }
+  .take-log-head b { font-family: var(--mono); font-weight: 600; letter-spacing: 0; color: var(--dark-text); }
+  .take-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .take-empty { padding: 12px 2px; font-size: 12px; color: var(--dark-muted); }
+  .take-item { border-bottom: 1px solid var(--line-dark); }
+  .take-row {
+    display: grid;
+    grid-template-columns: 24px 20px 18px minmax(0, 1fr) 22px 22px;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 2px;
+  }
+  .take-idx { font-family: var(--mono); font-size: 11px; color: var(--dark-muted); text-align: center; }
+  .take-item.active .take-idx { color: var(--red); }
+  .take-summary {
+    font-size: 12px;
+    color: var(--dark-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .take-summary:hover { color: #fff; }
+  .take-btn {
+    width: 22px; height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--line-dark);
+    color: var(--dark-text);
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1;
+  }
+  .take-btn svg { width: 12px; height: 12px; display: block; }
+  .take-btn:hover:not(:disabled) { background: var(--dark-text); color: var(--window); }
+  .take-btn.danger:hover:not(:disabled) { background: var(--red); border-color: var(--red); color: #fff; }
+  .take-btn:focus-visible { outline: 2px solid var(--dark-text); outline-offset: 1px; }
+  .take-btn.play { border-color: var(--dark-muted); }
+  .take-caret {
+    width: 18px; height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--dark-muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1;
+  }
+  .take-caret svg {
+    width: 12px;
+    height: 12px;
+    display: block;
+    transition: transform 90ms linear;
+  }
+  .take-caret.open svg { transform: rotate(90deg); }
+  .take-caret:hover { color: var(--dark-text); }
+  .take-caret:focus-visible { outline: 2px solid var(--dark-text); outline-offset: 1px; }
+  .take-detail {
+    padding: 2px 24px 10px 52px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--dark-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* status bar */
+  .statusbar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 0 20px;
+    background: var(--bone);
+    border-top: 1px solid var(--ink);
+    font-size: 11px;
+    color: var(--ink-2);
+    flex-wrap: wrap;
+  }
+  .sitem { display: inline-flex; gap: 6px; align-items: baseline; white-space: nowrap; }
+  .sitem b { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+  .sitem.dim { color: var(--muted); }
+  .statusbar .right { margin-left: auto; }
+  .sdivider { width: 1px; height: 14px; background: var(--line-bone); }
+
+  @media (max-width: 980px) {
+    html, body { height: auto; }
+    body { display: block; overflow-y: auto; overflow-x: hidden; }
+    .app {
+      height: auto;
+      min-height: 100dvh;
+      overflow: visible;
+      grid-template-rows: auto auto auto;
+      border: none;
+    }
+    .masthead { flex-wrap: wrap; height: auto; padding: 10px 16px; gap: 10px; }
+    .readout { margin-left: auto; }
+    .deck { grid-template-columns: 1fr; }
+    .bay { border-right: none; border-bottom: 1px solid var(--ink); overflow: visible; }
+    .field.grow { flex: none; }
+    #text { height: 240px; min-height: 0; }
+    .transport-deck { overflow: visible; }
+    .bay-actions { flex-wrap: wrap; }
+    .bay-actions .btn { flex: 0 0 auto; white-space: nowrap; }
+    .take-log { flex: none; }
+    .take-list { max-height: 260px; }
+    #meter { flex: none; height: 240px; min-height: 0; }
+    .statusbar { padding: 6px 16px; row-gap: 2px; min-height: 38px; }
+    .statusbar .right { margin-left: 0; }
+  }
+  /* compact the deck on short viewports so the page itself never scrolls */
+  @media (max-height: 900px) {
+    .bay { padding: 14px 16px 12px; gap: 10px; }
+    .transport-deck { padding: 14px 16px 12px; gap: 10px; }
+    #text { height: clamp(160px, 28vh, 320px); }
+    #meter { height: clamp(140px, 20vh, 240px); }
+  }
+  @media (max-height: 820px) {
+    .reels { height: 88px; }
+    .reel { width: 66px; height: 66px; }
+    .reel::after { width: 16px; height: 16px; }
+    .tape-line { left: 86px; right: 86px; }
+    .window { padding: 10px 12px 8px; }
+    .counter-row { margin-top: 8px; padding-top: 8px; gap: 12px; }
+    .timecode { font-size: 21px; }
+    .vu-row { padding: 5px 12px; }
+    .vu-dial { width: 106px; height: 45px; }
+    .stats { min-height: 16px; font-size: 11px; }
+    .param { padding: 7px 0; }
+    #text { height: 240px; }
+    #meter { height: 140px; }
+  }
+  @media (max-height: 700px) {
+    .masthead { padding: 0 14px; gap: 16px; }
+    .reels { height: 66px; }
+    .reel { width: 50px; height: 50px; }
+    .reel::after { width: 12px; height: 12px; }
+    .tape-line { left: 66px; right: 66px; }
+    .take, .sample-rate { font-size: 11px; }
+    .timecode { font-size: 18px; }
+    .vu-row { display: none; }
+    .transport-deck { gap: 8px; padding: 10px 14px; }
+    .bay { padding: 10px 14px; gap: 8px; }
+    #text { height: 190px; }
+    #meter { height: 110px; }
+    .hint { display: none; }
+    .bay-actions .btn { padding: 7px 12px; }
+    .stats { font-size: 10px; }
+  }
+  @media (max-height: 600px) {
+    .reels { height: 54px; padding: 0 4px; }
+    .reel { width: 40px; height: 40px; }
+    .reel::after { width: 10px; height: 10px; }
+    .tape-line { left: 48px; right: 48px; }
+    .window { padding: 8px 12px; }
+    .app { grid-template-rows: 48px minmax(0, 1fr) 32px; }
+    .masthead { padding: 0 12px; gap: 12px; }
+    .statusbar { gap: 12px; font-size: 10px; }
+    .transport-deck { padding: 8px 12px; gap: 6px; }
+    #text { height: 140px; }
+    #meter { height: 90px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rec-dot.live { animation: none; }
+    .reel { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="masthead">
+    <div class="brand">
+      <span class="brand-name">Breeze TTS 2</span>
+      <span class="brand-sub">语音合成台</span>
+    </div>
+    <div class="readout">
+      <span class="rec-dot" id="rec-dot"></span>
+      <span class="rec-label hidden" id="chip-busy">录音中</span>
+      <span id="chip-status">连接中</span>
+    </div>
+  </header>
+
+  <main class="deck">
+    <section class="bay" aria-label="控制面板">
+      <div class="field grow">
+        <div class="field-head">
+          <label for="text">文本</label>
+          <span class="counter" id="charcount">0 字</span>
+        </div>
+        <textarea id="text" rows="7" placeholder="输入中文或英文。Ctrl + Enter 开始合成。"></textarea>
+      </div>
+
+      <div class="events">
+        <span class="events-label">语气事件</span>
+        <button class="ev" data-ev="[笑]">[笑]</button>
+        <button class="ev" data-ev="[叹气]">[叹气]</button>
+        <button class="ev" data-ev="[咳嗽]">[咳嗽]</button>
+        <button class="ev" data-ev="[清嗓子]">[清嗓子]</button>
+        <span class="sep">|</span>
+        <button class="ev en" data-ev="(laugh)">(laugh)</button>
+        <button class="ev en" data-ev="(sigh)">(sigh)</button>
+        <button class="ev en" data-ev="(cough)">(cough)</button>
+        <button class="ev en" data-ev="(clears throat)">(clears throat)</button>
+      </div>
+
+      <div class="params">
+        <div class="param mode-row">
+          <span class="param-label">模式</span>
+          <nav class="modes" id="tabs" aria-label="合成模式">
+            <button class="tab active" data-mode="plain">纯文本</button>
+            <button class="tab" data-mode="design">音色设计</button>
+            <button class="tab" data-mode="clone">声音克隆</button>
+            <button class="tab" data-mode="direction">声音导演</button>
+          </nav>
+        </div>
+        <div class="param subfield hidden" id="instruction-wrap">
+          <label for="instruction">声音描述</label>
+          <div class="subfield-body">
+            <textarea id="instruction" rows="2" placeholder="例如：一位温柔自信的年轻女性，声音清晰，语气亲切。"></textarea>
+          </div>
+        </div>
+
+        <div class="param subfield hidden" id="ref-wrap">
+          <span class="param-label">参考音频</span>
+          <div class="subfield-body">
+            <div class="file-row">
+              <label class="file-btn" for="ref-audio">选择文件</label>
+              <input type="file" id="ref-audio" accept="audio/*" />
+              <span class="file-name" id="ref-name">未选择</span>
+            </div>
+            <audio id="ref-player" controls class="hidden"></audio>
+            <label class="sublabel" for="ref-text">参考文字稿（与音频逐字一致）</label>
+            <textarea id="ref-text" rows="2" placeholder="输入参考音频的准确文字稿。"></textarea>
+          </div>
+        </div>
+
+        <div class="param">
+          <label for="cfg">CFG</label>
+          <input type="range" id="cfg" min="1" max="6" step="0.1" value="1" />
+          <output id="cfg-val">1.0</output>
+        </div>
+        <div class="param">
+          <label for="seed">种子</label>
+          <input type="number" id="seed" value="42" min="0" max="4294967295" />
+          <button class="mini" id="seed-rand" type="button">随机</button>
+        </div>
+        <div class="param">
+          <label class="check" for="long-text"><input type="checkbox" id="long-text" /> 长文本分段</label>
+          <input type="number" id="chunk-chars" value="80" min="20" max="400" aria-label="每段字数" />
+          <span class="hint-inline">字 / 段</span>
+        </div>
+      </div>
+
+      <p class="hint" id="hint"></p>
+
+      <div class="bay-actions">
+        <button class="btn primary" id="generate"><span class="glyph">▶</span>生成语音</button>
+      </div>
+    </section>
+
+    <section class="transport-deck" aria-label="输出与播放">
+      <div class="window">
+        <div class="reels" id="reels">
+          <div class="tape-line"></div>
+          <div class="reel left" aria-hidden="true"></div>
+          <div class="reel right" aria-hidden="true"></div>
+        </div>
+        <div class="counter-row">
+          <span class="take">Take <b id="take-num">00</b></span>
+          <span class="timecode" id="time-code">00:00.00</span>
+          <span class="sample-rate">24 kHz</span>
+        </div>
+      </div>
+
+      <canvas id="meter" width="900" height="132" aria-label="波形电平"></canvas>
+
+      <div class="vu-row">
+        <span class="vu-label">VU</span>
+        <svg class="vu-dial" viewBox="0 0 128 54" aria-hidden="true">
+          <path d="M12 48 A52 52 0 0 1 116 48" fill="none" stroke="#4b453a" stroke-width="1" />
+          <path d="M20 48 A44 44 0 0 1 52 10" fill="none" stroke="#4b453a" stroke-width="1" />
+          <path d="M108 48 A44 44 0 0 0 76 10" fill="none" stroke="#4b453a" stroke-width="1" />
+          <line x1="27" y1="44" x2="31" y2="40" stroke="#6d6656" />
+          <line x1="45" y1="23" x2="48" y2="28" stroke="#6d6656" />
+          <line x1="64" y1="8" x2="64" y2="14" stroke="#6d6656" />
+          <line x1="83" y1="23" x2="80" y2="28" stroke="#6d6656" />
+          <line id="vu-needle" x1="64" y1="46" x2="64" y2="12" stroke="#c2181c" stroke-width="1.5" transform="rotate(-48 64 46)" />
+          <circle cx="64" cy="46" r="3" fill="#e8e2d3" />
+        </svg>
+        <span class="vu-db" id="vu-db">−∞ dB</span>
+      </div>
+
+      <div class="stats" id="stats">等待输入。选择模式，写入文本，然后开始合成。</div>
+
+      <div class="take-log">
+        <div class="take-log-head"><span>生成记录</span><b id="take-count">0 条</b></div>
+        <div class="take-list" id="take-list">
+          <div class="take-empty">还没有生成记录。生成一次后会出现在这里。</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span class="sitem">显存 <b id="chip-vram">—</b></span>
+    <span class="sitem">内存 <b id="chip-ram">—</b></span>
+    <span class="sdivider"></span>
+    <span class="sitem dim">单进程 / 流式 PCM / 24 kHz</span>
+    <span class="sitem dim right">Breeze TTS 2 · 本地推理 · 非商业许可</span>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+const $ = (sel) => document.querySelector(sel);
+const STATE = {
+  mode: "plain",
+  busy: false,
+  abort: null,
+  audioCtx: null,
+  sources: [],
+  nextTime: 0,
+  pending: new Float32Array(0),
+  pcmChunks: [],
+  totalSamples: 0,
+  sampleRate: 24000,
+  startedAt: 0,
+  firstChunkMs: null,
+  levels: [],
+  vu: 0,
+  take: 0,
+  segmentIndex: 0,
+  segmentTotal: 1,
+  takes: [],
+  takeSeq: 0,
+  expanded: new Set(),
+  activeTake: null,
+  playSource: null,
+  playStartCtxTime: 0,
+  playOffsetS: 0,
+  playRequest: 0,
+  playing: false,
+  playRaf: 0,
+};
+
+const MODE_META = {
+  plain: { cfg: 1.0, hint: "纯文本：模型用默认音色朗读文本。" },
+  design: { cfg: 4.0, hint: "音色设计：不需要参考音频，用文字描述声音与语气。CFG 4 指令跟随更强。" },
+  clone: { cfg: 1.0, hint: "声音克隆：参考音频与逐字稿一起提供，保留音色、节奏与情绪。" },
+  direction: { cfg: 4.0, hint: "声音导演：克隆参考音色，再用指令控制语气和节奏。CFG 4 指令跟随更强。" },
+};
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function setMode(mode) {
+  STATE.mode = mode;
+  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  $("#instruction-wrap").classList.toggle("hidden", !(mode === "design" || mode === "direction"));
+  $("#ref-wrap").classList.toggle("hidden", !(mode === "clone" || mode === "direction"));
+  const cfg = $("#cfg");
+  cfg.value = String(MODE_META[mode].cfg);
+  $("#cfg-val").textContent = Number(cfg.value).toFixed(1);
+  $("#hint").textContent = MODE_META[mode].hint;
+}
+
+function insertAtCursor(el, text) {
+  if (!el) return;
+  el.focus();
+  if (typeof el.setRangeText === "function") {
+    el.setRangeText(text, el.selectionStart ?? el.value.length, el.selectionEnd ?? el.value.length, "end");
+  } else {
+    el.value += text;
+  }
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function updateCharCount() {
+  $("#charcount").textContent = `${$("#text").value.length} 字`;
+}
+
+function ensureAudioCtx() {
+  if (!STATE.audioCtx) {
+    STATE.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (STATE.audioCtx.state === "suspended") STATE.audioCtx.resume();
+  return STATE.audioCtx;
+}
+
+function formatTC(samples) {
+  const totalSec = samples / STATE.sampleRate;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec - m * 60;
+  return `${String(m).padStart(2, "0")}:${s.toFixed(2).padStart(5, "0")}`;
+}
+
+/* ---------- take history: persistence, list, playback ---------- */
+function pad2(value) { return String(value).padStart(2, "0"); }
+
+function formatTakeDuration(take) {
+  return formatTC((take.duration_s || 0) * STATE.sampleRate);
+}
+
+function summarizeTake(text) {
+  const flat = String(text || "").replace(/\s+/g, " ").trim();
+  if (!flat) return "（无文字内容）";
+  return flat.length > 36 ? `${flat.slice(0, 36)}…` : flat;
+}
+
+async function takeBuffer(take) {
+  if (take.buf) return take.buf;
+  const ctx = ensureAudioCtx();
+  if (take.chunks && take.chunks.length) {
+    const buffer = ctx.createBuffer(1, take.samples, take.sampleRate || STATE.sampleRate);
+    const channel = buffer.getChannelData(0);
+    let offset = 0;
+    for (const chunk of take.chunks) {
+      for (let i = 0; i < chunk.length; i++) channel[offset + i] = chunk[i] / 32768;
+      offset += chunk.length;
+    }
+    take.buf = buffer;
+    return buffer;
+  }
+  if (!take.url) throw new Error("音频地址缺失");
+  const resp = await fetch(take.url, { cache: "force-cache" });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  take.buf = await ctx.decodeAudioData(await resp.arrayBuffer());
+  return take.buf;
+}
+
+function renderTakes() {
+  const list = $("#take-list");
+  if (!list) return;
+  $("#take-count").textContent = `${STATE.takes.length} 条`;
+  list.textContent = "";
+  if (!STATE.takes.length) {
+    const empty = document.createElement("div");
+    empty.className = "take-empty";
+    empty.textContent = "还没有生成记录。生成一次后会出现在这里。";
+    list.appendChild(empty);
+    return;
+  }
+  for (const take of STATE.takes) {
+    const active = STATE.activeTake === take;
+    const expanded = STATE.expanded.has(take.id);
+    const item = document.createElement("div");
+    item.className = `take-item${active ? " active" : ""}`;
+    item.dataset.id = take.id;
+
+    const row = document.createElement("div");
+    row.className = "take-row";
+
+    const play = document.createElement("button");
+    play.className = "take-btn play";
+    play.dataset.act = "play";
+    play.title = STATE.playing && active ? "暂停" : "播放";
+    play.textContent = STATE.playing && active ? "❚❚" : "▶";
+
+    const idx = document.createElement("span");
+    idx.className = "take-idx";
+    idx.textContent = pad2(take.number);
+
+    const summary = document.createElement("span");
+    summary.className = "take-summary";
+    summary.dataset.act = "expand";
+    summary.textContent = summarizeTake(take.text);
+    summary.title = "点击查看 / 收起完整文字";
+
+    const expand = document.createElement("button");
+    expand.className = `take-caret${expanded ? " open" : ""}`;
+    expand.dataset.act = "expand";
+    expand.title = expanded ? "收起文字" : "展开文字";
+    expand.setAttribute("aria-expanded", expanded ? "true" : "false");
+    expand.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.25 2.5 7.75 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    const download = document.createElement("button");
+    download.className = "take-btn";
+    download.dataset.act = "download";
+    download.title = "下载 WAV";
+    download.textContent = "↓";
+
+    const remove = document.createElement("button");
+    remove.className = "take-btn danger";
+    remove.dataset.act = "delete";
+    remove.title = "删除";
+    remove.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.2h11M6.2 4.2V2.8h3.6v1.4M4.2 4.2l.7 9h6.2l.7-9M6.6 6.6v4.6M9.4 6.6v4.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    row.append(play, idx, expand, summary, download, remove);
+    item.appendChild(row);
+
+    if (expanded) {
+      const detail = document.createElement("div");
+      detail.className = "take-detail";
+      detail.textContent = take.text || "（无文字内容）";
+      item.appendChild(detail);
+    }
+    list.appendChild(item);
+  }
+}
+
+async function loadHistory() {
+  try {
+    const resp = await fetch("/api/takes", { cache: "no-store" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    STATE.takes = Array.isArray(data.takes) ? data.takes : [];
+  } catch (error) {
+    STATE.takes = [];
+    $("#stats").className = "stats err";
+    $("#stats").textContent = `历史记录加载失败：${error && error.message ? error.message : error}`;
+  }
+  renderTakes();
+  if (STATE.takes.length) {
+    const latest = STATE.takes[0];
+    $("#take-num").textContent = pad2(latest.number);
+    $("#time-code").textContent = formatTakeDuration(latest);
+  }
+}
+
+async function saveTake(text, mode) {
+  const blob = encodeWav(STATE.pcmChunks.slice(), STATE.sampleRate);
+  const form = new FormData();
+  form.append("file", blob, "take.wav");
+  form.append("text", text || "");
+  form.append("mode", mode || "plain");
+  form.append("sample_rate", String(STATE.sampleRate));
+  form.append("duration_s", String(STATE.totalSamples / STATE.sampleRate));
+  const resp = await fetch("/api/takes", { method: "POST", body: form });
+  if (!resp.ok) {
+    let detail = `HTTP ${resp.status}`;
+    try {
+      const data = await resp.json();
+      if (data && data.detail) detail = data.detail;
+    } catch (_) { /* non-json error body */ }
+    throw new Error(detail);
+  }
+  return resp.json();
+}
+
+async function captureTake(text, mode) {
+  if (STATE.totalSamples === 0) return null;
+  const chunks = STATE.pcmChunks.slice();
+  const sampleRate = STATE.sampleRate;
+  const samples = STATE.totalSamples;
+  try {
+    const record = await saveTake(text, mode);
+    record.chunks = null;
+    record.buf = null;
+    STATE.takes.unshift(record);
+    $("#take-num").textContent = pad2(record.number);
+    $("#time-code").textContent = formatTakeDuration(record);
+    renderTakes();
+    return record;
+  } catch (error) {
+    const fallback = {
+      id: `local-${Date.now()}-${STATE.takeSeq++}`,
+      number: STATE.take,
+      text: text || "",
+      mode: mode || "plain",
+      sample_rate: sampleRate,
+      duration_s: samples / sampleRate,
+      samples,
+      chunks,
+      buf: null,
+      url: null,
+      created_at: new Date().toISOString(),
+    };
+    STATE.takes.unshift(fallback);
+    renderTakes();
+    $("#stats").className = "stats err";
+    $("#stats").textContent = `记录保存失败：${error && error.message ? error.message : error}`;
+    return fallback;
+  }
+}
+
+function stopPlaybackRaf() {
+  if (STATE.playRaf) { cancelAnimationFrame(STATE.playRaf); STATE.playRaf = 0; }
+}
+
+function stopPlayback() {
+  stopPlaybackRaf();
+  const source = STATE.playSource;
+  STATE.playSource = null;
+  STATE.playing = false;
+  STATE.playOffsetS = 0;
+  if (source) {
+    source.onended = null;
+    try { source.stop(); } catch (_) { /* already stopped */ }
+  }
+}
+
+function tickPlayback() {
+  const take = STATE.activeTake;
+  if (!STATE.playing || !STATE.playSource || !take || !take.buf) return;
+  const position = Math.min(take.buf.duration, Math.max(0, STATE.audioCtx.currentTime - STATE.playStartCtxTime));
+  $("#time-code").textContent = formatTC(position * STATE.sampleRate);
+  STATE.playRaf = requestAnimationFrame(tickPlayback);
+}
+
+async function startTake(take, offsetS = 0) {
+  if (!take) return;
+  const requestId = ++STATE.playRequest;
+  let buffer;
+  try {
+    buffer = await takeBuffer(take);
+  } catch (error) {
+    $("#stats").className = "stats err";
+    $("#stats").textContent = `无法播放该条记录：${error && error.message ? error.message : error}`;
+    return;
+  }
+  if (requestId !== STATE.playRequest) return;
+  ensureAudioCtx();
+  const ctx = STATE.audioCtx;
+  stopPlaybackRaf();
+  const previous = STATE.playSource;
+  STATE.playSource = null;
+  if (previous) {
+    previous.onended = null;
+    try { previous.stop(); } catch (_) { /* already stopped */ }
+  }
+  let offset = Math.max(0, Math.min(buffer.duration, offsetS));
+  if (offset >= buffer.duration) offset = 0;
+  STATE.activeTake = take;
+  STATE.playOffsetS = offset;
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(ctx.destination);
+  source.onended = () => {
+    if (STATE.playSource !== source) return;
+    STATE.playSource = null;
+    STATE.playing = false;
+    STATE.playOffsetS = buffer.duration;
+    stopPlaybackRaf();
+    $("#time-code").textContent = formatTC(buffer.duration * STATE.sampleRate);
+    renderTakes();
+  };
+  STATE.playSource = source;
+  STATE.playing = true;
+  STATE.playStartCtxTime = ctx.currentTime - offset;
+  source.start(ctx.currentTime, offset);
+  $("#take-num").textContent = pad2(take.number);
+  $("#time-code").textContent = formatTC(offset * STATE.sampleRate);
+  renderTakes();
+  tickPlayback();
+}
+
+function pausePlayback() {
+  const take = STATE.activeTake;
+  if (!STATE.playSource || !take || !take.buf) return;
+  const position = Math.min(take.buf.duration, Math.max(0, STATE.audioCtx.currentTime - STATE.playStartCtxTime));
+  STATE.playOffsetS = position;
+  const source = STATE.playSource;
+  STATE.playSource = null;
+  STATE.playing = false;
+  source.onended = null;
+  try { source.stop(); } catch (_) { /* already stopped */ }
+  stopPlaybackRaf();
+  $("#time-code").textContent = formatTC(position * STATE.sampleRate);
+  renderTakes();
+}
+
+function toggleTake(take) {
+  if (!take) return;
+  if (STATE.playing && STATE.activeTake === take) {
+    pausePlayback();
+    return;
+  }
+  if (STATE.activeTake === take) {
+    startTake(take, STATE.playOffsetS);
+    return;
+  }
+  startTake(take, 0);
+}
+
+async function deleteTake(id) {
+  const take = STATE.takes.find((item) => item.id === id);
+  if (!take) return;
+  if (take.url && !String(id).startsWith("local-")) {
+    try {
+      const resp = await fetch(`/api/takes/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    } catch (error) {
+      $("#stats").className = "stats err";
+      $("#stats").textContent = `删除失败：${error && error.message ? error.message : error}`;
+      return;
+    }
+  }
+  STATE.takes = STATE.takes.filter((item) => item !== take);
+  STATE.expanded.delete(id);
+  if (STATE.activeTake === take) {
+    stopPlayback();
+    STATE.activeTake = null;
+    $("#time-code").textContent = STATE.takes.length ? formatTakeDuration(STATE.takes[0]) : "00:00.00";
+  }
+  if (!STATE.takes.length) $("#time-code").textContent = "00:00.00";
+  else if (!STATE.activeTake) $("#time-code").textContent = formatTakeDuration(STATE.takes[0]);
+  const labelTake = STATE.activeTake || STATE.takes[0];
+  $("#take-num").textContent = labelTake ? pad2(labelTake.number) : "00";
+  renderTakes();
+}
+
+function downloadTake(take) {
+  if (!take) return;
+  const stamp = String(take.created_at || "").replace(/[-:T]/g, "").slice(0, 14);
+  const filename = `breeze-take-${pad2(take.number)}-${stamp || Date.now()}.wav`;
+  const a = document.createElement("a");
+  if (take.url) {
+    a.href = take.url;
+  } else if (take.chunks && take.chunks.length) {
+    const url = URL.createObjectURL(encodeWav(take.chunks, take.sampleRate || STATE.sampleRate));
+    a.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } else {
+    return;
+  }
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function resetOutput() {
+  stopPlayback();
+  STATE.activeTake = null;
+  STATE.playOffsetS = 0;
+  STATE.sources.forEach((s) => { try { s.stop(); } catch (_) {} });
+  STATE.sources = [];
+  STATE.nextTime = 0;
+  STATE.pending = new Float32Array(0);
+  STATE.pcmChunks = [];
+  STATE.totalSamples = 0;
+  STATE.firstChunkMs = null;
+  STATE.levels = [];
+  STATE.vu = 0;
+  STATE.segmentIndex = 0;
+  STATE.startedAt = performance.now();
+  $("#time-code").textContent = "00:00.00";
+  $("#vu-db").textContent = "−∞ dB";
+  $("#vu-needle").setAttribute("transform", "rotate(-48 64 46)");
+  drawMeter();
+}
+
+function scheduleBuffer(float32) {
+  if (!float32.length) return;
+  const ctx = ensureAudioCtx();
+  const buf = ctx.createBuffer(1, float32.length, STATE.sampleRate);
+  buf.copyToChannel(float32, 0);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination);
+  const startAt = Math.max(ctx.currentTime + 0.05, STATE.nextTime);
+  src.start(startAt);
+  STATE.nextTime = startAt + buf.duration;
+  STATE.sources.push(src);
+  src.onended = () => { STATE.sources = STATE.sources.filter((s) => s !== src); };
+}
+
+function flushPending() {
+  if (STATE.pending.length) {
+    scheduleBuffer(STATE.pending);
+    STATE.pending = new Float32Array(0);
+  }
+}
+
+function drawMeter() {
+  const canvas = $("#meter");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.fillStyle = "#211f1b";
+  ctx.fillRect(0, 0, w, h);
+  /* instrument grid: horizontal rulings like a chart recorder */
+  ctx.strokeStyle = "#2b261f";
+  ctx.lineWidth = 1;
+  for (let y = 0; y < h; y += 22) {
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(w, y + 0.5);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "#4a4436";
+  ctx.beginPath();
+  ctx.moveTo(0, Math.round(h / 2) + 0.5);
+  ctx.lineTo(w, Math.round(h / 2) + 0.5);
+  ctx.stroke();
+  /* bottom timing ticks, like a chart recorder edge */
+  ctx.strokeStyle = "#3a342b";
+  for (let x = 0; x < w; x += 24) {
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, h);
+    ctx.lineTo(x + 0.5, h - ((x / 24) % 4 === 0 ? 7 : 4));
+    ctx.stroke();
+  }
+  const levels = STATE.levels;
+  const total = STATE.totalSamples / STATE.sampleRate;
+  const windowSec = Math.max(3, total + 0.25);
+  const span = w - 2;
+  for (const p of levels) {
+    const x = Math.min(span, (p.t / windowSec) * span);
+    const bh = Math.max(1, p.v * (h * 0.86));
+    ctx.fillStyle = "#d9d3c2";
+    ctx.fillRect(x, (h - bh) / 2, 1.5, bh);
+  }
+  if (levels.length) {
+    const last = levels[levels.length - 1];
+    const x = Math.min(span, (last.t / windowSec) * span);
+    ctx.fillStyle = "#c2181c";
+    ctx.fillRect(x - 0.5, h * 0.07, 2, h * 0.86);
+  }
+}
+
+function updateVU(rms) {
+  const target = Math.min(1, rms * 5.2);
+  STATE.vu = Math.max(target, STATE.vu * 0.86);
+  const deg = -48 + STATE.vu * 96;
+  $("#vu-needle").setAttribute("transform", `rotate(${deg.toFixed(1)} 64 46)`);
+  const db = 20 * Math.log10(Math.max(1e-5, rms));
+  $("#vu-db").textContent = `${db <= -60 ? "−∞" : db.toFixed(1)} dB`;
+}
+
+
+function appendInt16(int16) {
+  if (!int16.length) return;
+  const f32 = new Float32Array(int16.length);
+  let sum = 0;
+  for (let i = 0; i < int16.length; i++) {
+    const v = int16[i] / 32768;
+    f32[i] = v;
+    sum += v * v;
+  }
+  updateVU(Math.sqrt(sum / int16.length));
+  /* detailed envelope for the chart-recorder window */
+  const baseSample = STATE.totalSamples - int16.length;
+  const block = 128;
+  for (let i = 0; i < int16.length; i += block) {
+    const end = Math.min(i + block, int16.length);
+    let s = 0;
+    for (let j = i; j < end; j++) {
+      const v = int16[j] / 32768;
+      s += v * v;
+    }
+    STATE.levels.push({
+      t: (baseSample + i) / STATE.sampleRate,
+      v: Math.min(1, Math.sqrt(s / (end - i)) * 4),
+    });
+  }
+  if (STATE.levels.length > 6000) STATE.levels.splice(0, STATE.levels.length - 6000);
+  drawMeter();
+  const merged = new Float32Array(STATE.pending.length + f32.length);
+  merged.set(STATE.pending, 0);
+  merged.set(f32, STATE.pending.length);
+  STATE.pending = merged;
+  if (STATE.pending.length >= STATE.sampleRate * 0.5) flushPending();
+}
+
+async function playStream(resp) {
+  const sr = Number(resp.headers.get("X-Sample-Rate") || STATE.sampleRate);
+  if (sr && sr !== STATE.sampleRate) STATE.sampleRate = sr;
+  const reader = resp.body.getReader();
+  let leftover = new Uint8Array(0);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value && value.length) {
+      const merged = new Uint8Array(leftover.length + value.length);
+      merged.set(leftover, 0);
+      merged.set(value, leftover.length);
+      const usable = merged.length - (merged.length % 2);
+      if (usable > 0) {
+        const int16 = new Int16Array(merged.buffer.slice(merged.byteOffset, merged.byteOffset + usable));
+        STATE.pcmChunks.push(int16.slice());
+        STATE.totalSamples += int16.length;
+        if (STATE.firstChunkMs === null) STATE.firstChunkMs = performance.now() - STATE.startedAt;
+        appendInt16(int16);
+        $("#time-code").textContent = formatTC(STATE.totalSamples);
+      }
+      leftover = merged.slice(usable);
+      updateStatsLive();
+    }
+  }
+  flushPending();
+}
+
+async function synthesizeSegment(text, opts) {
+  const fd = new FormData();
+  fd.append("text", text);
+  if (opts.mode === "design" || opts.mode === "direction") fd.append("instruction", opts.instruction);
+  if (opts.mode === "clone" || opts.mode === "direction") {
+    fd.append("ref_audio", opts.refFile);
+    fd.append("ref_text", opts.refText);
+  }
+  fd.append("cfg_scale", String(opts.cfg));
+  fd.append("seed", String(opts.seed));
+
+  let resp = null;
+  for (let attempt = 0; attempt < 240; attempt++) {
+    if (opts.signal.aborted) throw new DOMException("已停止", "AbortError");
+    resp = await fetch("/v1/audio/speech", { method: "POST", body: fd, signal: opts.signal });
+    if (resp.status === 409) {
+      $("#stats").textContent = "设备忙，排队等待中…";
+      $("#stats").className = "stats";
+      await resp.text().catch(() => {});
+      await sleep(400);
+      continue;
+    }
+    break;
+  }
+  if (!resp || !resp.ok) {
+    let msg = resp ? `HTTP ${resp.status}` : "请求失败";
+    if (resp) {
+      try {
+        const data = await resp.json();
+        if (data && data.detail) msg = data.detail;
+        else if (data && data.error) msg = data.error;
+      } catch (_) {}
+    }
+    throw new Error(msg);
+  }
+  await playStream(resp);
+}
+
+function splitLongText(text, maxChars) {
+  const parts = text.split(/(?<=[。！？!?；;…\n])/);
+  const out = [];
+  let buf = "";
+  const push = (s) => { if (s) out.push(s); };
+  for (const raw of parts) {
+    let piece = raw.trim();
+    if (!piece) continue;
+    while (piece.length > maxChars) {
+      if (buf) { push(buf); buf = ""; }
+      push(piece.slice(0, maxChars));
+      piece = piece.slice(maxChars);
+    }
+    if (!piece) continue;
+    if (buf && buf.length + piece.length > maxChars) {
+      push(buf);
+      buf = piece;
+    } else {
+      buf += piece;
+    }
+  }
+  push(buf);
+  return out.length ? out : [text];
+}
+
+function updateStatsLive() {
+  const elapsed = (performance.now() - STATE.startedAt) / 1000;
+  const seconds = STATE.totalSamples / STATE.sampleRate;
+  const first = STATE.firstChunkMs === null ? "—" : (STATE.firstChunkMs / 1000).toFixed(2);
+  const rtf = seconds > 0 ? (elapsed / seconds).toFixed(2) : "—";
+  const seg = STATE.segmentTotal > 1 ? `第 ${STATE.segmentIndex}/${STATE.segmentTotal} 段 · ` : "";
+  $("#stats").className = "stats";
+  $("#stats").textContent =
+    `${seg}首块 ${first} s / 已生成 ${seconds.toFixed(2)} s / 用时 ${elapsed.toFixed(1)} s / RTF ${rtf}×`;
+}
+
+function showError(msg) {
+  $("#stats").className = "stats err";
+  $("#stats").textContent = `出错：${msg}`;
+}
+
+function setBusyUI(busy) {
+  const btn = $("#generate");
+  btn.classList.toggle("primary", !busy);
+  btn.innerHTML = busy
+    ? '<span class="glyph">■</span>停止'
+    : '<span class="glyph">▶</span>生成语音';
+  $("#chip-busy").classList.toggle("hidden", !busy);
+  $("#rec-dot").classList.toggle("live", busy);
+  $("#reels").classList.toggle("run", busy);
+  document.body.classList.toggle("generating", busy);
+}
+
+async function generate() {
+  if (STATE.busy) return;
+  const text = $("#text").value.trim();
+  if (!text) return showError("请输入要朗读的文本。");
+  const mode = STATE.mode;
+  const instruction = $("#instruction").value.trim();
+  if ((mode === "design" || mode === "direction") && !instruction) {
+    return showError("音色设计 / 声音导演需要填写声音描述或语气指令。");
+  }
+  const refFile = $("#ref-audio").files[0];
+  const refText = $("#ref-text").value.trim();
+  if ((mode === "clone" || mode === "direction") && (!refFile || !refText)) {
+    return showError("声音克隆 / 声音导演需要参考音频和逐字文字稿。");
+  }
+  const cfg = Number($("#cfg").value);
+  const seed = Math.max(0, Math.min(4294967295, parseInt($("#seed").value, 10) || 0));
+  const longText = $("#long-text").checked;
+  const maxChars = Math.max(20, Math.min(400, parseInt($("#chunk-chars").value, 10) || 80));
+  const segments = longText ? splitLongText(text, maxChars) : [text];
+
+  ensureAudioCtx();
+  resetOutput();
+  STATE.take += 1;
+  $("#take-num").textContent = String(STATE.take).padStart(2, "0");
+  STATE.segmentTotal = segments.length;
+  STATE.segmentIndex = 1;
+  STATE.busy = true;
+  STATE.abort = new AbortController();
+  setBusyUI(true);
+  $("#stats").className = "stats";
+  $("#stats").textContent = segments.length > 1
+    ? `共 ${segments.length} 段，开始合成…`
+    : "开始合成…";
+
+  try {
+    for (let i = 0; i < segments.length; i++) {
+      if (STATE.abort.signal.aborted) break;
+      STATE.segmentIndex = i + 1;
+      updateStatsLive();
+      await synthesizeSegment(segments[i], { mode, instruction, refFile, refText, cfg, seed, signal: STATE.abort.signal });
+    }
+    flushPending();
+    const elapsed = (performance.now() - STATE.startedAt) / 1000;
+    const seconds = STATE.totalSamples / STATE.sampleRate;
+    const first = STATE.firstChunkMs === null ? "—" : (STATE.firstChunkMs / 1000).toFixed(2);
+    $("#stats").className = "stats ok";
+    $("#stats").textContent =
+      `完成 / 首块 ${first} s / 音频 ${seconds.toFixed(2)} s / 用时 ${elapsed.toFixed(1)} s / RTF ${(elapsed / Math.max(0.001, seconds)).toFixed(2)}×`;
+    await captureTake(text, mode);
+  } catch (err) {
+    if (err && (err.name === "AbortError" || err.message === "已停止")) {
+      $("#stats").className = "stats";
+      $("#stats").textContent = `已停止 / 已生成 ${(STATE.totalSamples / STATE.sampleRate).toFixed(2)} s`;
+      await captureTake(text, mode);
+    } else {
+      showError(err && err.message ? err.message : String(err));
+    }
+  } finally {
+    STATE.busy = false;
+    STATE.abort = null;
+    setBusyUI(false);
+    flushPending();
+  }
+}
+
+function stopAll() {
+  if (STATE.abort) STATE.abort.abort();
+  stopPlayback();
+  STATE.sources.forEach((s) => { try { s.stop(); } catch (_) {} });
+  STATE.sources = [];
+  STATE.nextTime = 0;
+  STATE.pending = new Float32Array(0);
+  $("#time-code").textContent = STATE.totalSamples ? formatTC(STATE.totalSamples) : "00:00.00";
+}
+
+function encodeWav(chunks, sampleRate) {
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const buffer = new ArrayBuffer(44 + total * 2);
+  const view = new DataView(buffer);
+  const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + total * 2, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, total * 2, true);
+  let off = 44;
+  for (const c of chunks) {
+    new Uint8Array(buffer, off, c.byteLength).set(new Uint8Array(c.buffer, c.byteOffset, c.byteLength));
+    off += c.byteLength;
+  }
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+function fmtGiB(bytes) {
+  if (bytes === null || bytes === undefined) return "—";
+  return (bytes / 1024 ** 3).toFixed(1) + " GiB";
+}
+
+async function updateServerStatus() {
+  try {
+    const resp = await fetch("/api/status", { cache: "no-store" });
+    if (!resp.ok) {
+      $("#chip-status").textContent = "连接中";
+      return;
+    }
+    const s = await resp.json();
+    STATE.sampleRate = s.sample_rate || STATE.sampleRate;
+    $("#chip-status").textContent = "已就绪";
+    $("#chip-vram").textContent = `${fmtGiB(s.gpu_used)} / ${fmtGiB(s.gpu_total)}`;
+    $("#chip-ram").textContent = `${fmtGiB(s.ram_used)} / ${fmtGiB(s.ram_total)}`;
+    if (s.busy && !STATE.busy) {
+      $("#chip-busy").classList.remove("hidden");
+      $("#rec-dot").classList.add("live");
+    } else if (!STATE.busy) {
+      $("#chip-busy").classList.add("hidden");
+      $("#rec-dot").classList.remove("live");
+    }
+  } catch (_) {
+    $("#chip-status").textContent = "未连接";
+  }
+}
+
+/* wiring */
+document.querySelectorAll(".tab").forEach((btn) => {
+  btn.addEventListener("click", () => setMode(btn.dataset.mode));
+});
+document.querySelectorAll(".ev").forEach((btn) => {
+  btn.addEventListener("click", () => insertAtCursor($("#text"), btn.dataset.ev));
+});
+$("#text").addEventListener("input", updateCharCount);
+$("#cfg").addEventListener("input", () => { $("#cfg-val").textContent = Number($("#cfg").value).toFixed(1); });
+$("#seed-rand").addEventListener("click", () => {
+  $("#seed").value = String(Math.floor(Math.random() * 4294967296));
+});
+$("#generate").addEventListener("click", () => {
+  if (STATE.busy) stopAll();
+  else generate();
+});
+$("#take-list").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-act]");
+  if (!btn) return;
+  const item = btn.closest(".take-item");
+  if (!item) return;
+  const take = STATE.takes.find((entry) => String(entry.id) === item.dataset.id);
+  if (!take) return;
+  const act = btn.dataset.act;
+  if (act === "play") toggleTake(take);
+  else if (act === "download") downloadTake(take);
+  else if (act === "delete") deleteTake(take.id);
+  else if (act === "expand") {
+    if (STATE.expanded.has(take.id)) STATE.expanded.delete(take.id);
+    else STATE.expanded.add(take.id);
+    renderTakes();
+  }
+});
+$("#ref-audio").addEventListener("change", () => {
+  const file = $("#ref-audio").files[0];
+  const player = $("#ref-player");
+  if (file) {
+    player.src = URL.createObjectURL(file);
+    player.classList.remove("hidden");
+    $("#ref-name").textContent = file.name;
+  } else {
+    player.classList.add("hidden");
+    $("#ref-name").textContent = "未选择";
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    e.preventDefault();
+    generate();
+  }
+});
+
+setMode("plain");
+updateCharCount();
+loadHistory();
+drawMeter();
+updateServerStatus();
+setInterval(updateServerStatus, 5000);
+
+function fitCanvas() {
+  const canvas = $("#meter");
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(120, Math.round(rect.width));
+  const h = Math.max(90, Math.round(rect.height));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+    drawMeter();
+  }
+}
+window.addEventListener("resize", fitCanvas);
+if (window.ResizeObserver) {
+  new ResizeObserver(() => fitCanvas()).observe($("#meter"));
+}
+fitCanvas();
+</script>
+</body>
+</html>
