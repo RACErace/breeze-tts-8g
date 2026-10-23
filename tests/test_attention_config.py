@@ -95,10 +95,10 @@ def test_resolve_attn_implementation_prefers_flash_when_available(monkeypatch) -
     assert resolve_attn_implementation("eager") == "eager"
 
 
-def test_resolve_attn_implementation_falls_back_to_eager(monkeypatch) -> None:
+def test_resolve_attn_implementation_falls_back_to_sdpa(monkeypatch) -> None:
     monkeypatch.setattr("breeze_infer.runtime.flash_attention_available", lambda: False)
 
-    assert resolve_attn_implementation() == "eager"
+    assert resolve_attn_implementation() == "sdpa"
     with pytest.raises(ImportError, match="flash-attn"):
         resolve_attn_implementation("flash_attention_2")
 

@@ -28,9 +28,9 @@ def resolve_attn_implementation(attn_implementation: str | None = None) -> str:
     """Return the attention backend used for inference.
 
     An explicit choice always wins. Otherwise prefer FlashAttention-2 when the
-    package is installed and fall back to eager, so a plain
+    package is installed and fall back to SDPA otherwise, so a plain
     ``pip install -r requirements.txt`` (which does not include flash-attn)
-    still runs.
+    still runs, including on Windows where flash-attn has no wheel.
     """
     if attn_implementation is not None:
         if (
@@ -43,7 +43,7 @@ def resolve_attn_implementation(attn_implementation: str | None = None) -> str:
         return attn_implementation
     if flash_attention_available():
         return DEFAULT_ATTN_IMPLEMENTATION
-    return "eager"
+    return "sdpa"
 
 
 def get_dist_info() -> tuple[int, int, int]:

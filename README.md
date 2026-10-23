@@ -39,9 +39,9 @@ Breeze TTS 2 is an open-weight text-to-speech model built for real-time interact
 
 ### Requirements
 
-- Linux and Python 3.10 or newer
+- Linux, or Windows (see "Windows setup" below); Python 3.10 or newer
 - A CUDA-capable NVIDIA GPU
-- GPU memory: approximately 7.7 GiB for eager inference or 14.4 GiB with `--fast-all`; use a 12 GB GPU for eager or a 24 GB GPU for the fast path
+- GPU memory: approximately 7.7 GiB for eager inference or 14.4 GiB with `--fast-all`; the accelerated 8 GB recipe below uses about 6.3 GiB reserved
 - The Breeze TTS 2 checkpoint
 - Optional: `flash-attn` for FlashAttention-2 attention kernels; the runtime uses them automatically when the package is importable
 
@@ -63,11 +63,11 @@ python -m pip install -r requirements.txt
 All required model components are included in the Breeze TTS 2 checkpoint.
 
 Attention backend: when `flash-attn` is installed, the text encoder and backbone
-load with `flash_attention_2`; otherwise the runtime falls back to eager
-attention. The CUDA-graph fast stages and the small depth decoder keep their
-previous static-mask (eager/SDPA) backends, because FlashAttention's dynamic
-padding masks cannot be captured in a CUDA graph and are not worthwhile for the
-short depth-decoder sequences.
+load with `flash_attention_2`; otherwise the runtime falls back to SDPA. The
+CUDA-graph fast stages and the small depth decoder keep their previous
+static-mask (eager/SDPA) backends, because FlashAttention's dynamic padding masks
+cannot be captured in a CUDA graph and are not worthwhile for the short
+depth-decoder sequences.
 
 For the tested CUDA environment, build the included Docker image:
 
@@ -80,6 +80,32 @@ The default image targets H100/Hopper (sm90). For A100:
 ```bash
 FLASH_ATTN_CUDA_ARCHS=80 bash docker/build.sh
 ```
+
+### Windows setup
+
+The accelerated path also runs natively on Windows. The platform-specific
+pieces are:
+
+- Python 3.12 (a conda env is easiest): `conda create -n breeze-win python=3.12`
+- `torch==2.9.1+cu128` and `torchaudio==2.9.1+cu128` from the PyTorch cu128 index
+- `triton-windows==3.5.1.post24` — the Triton build matching torch 2.9.1; newer
+  releases (3.6+) break Inductor with
+  `'KernelMetadata' object has no attribute 'cluster_dims'`
+- `flash-attn` has no reliable Windows wheel; the runtime then falls back to
+  SDPA automatically (slower text-encoder/prefill, same audio)
+- Set `TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=0`: the static CUDA launcher passes
+  64-bit kernel pointers through `ctypes.c_long`, which is 32-bit on Windows,
+  raising `OverflowError: Python int too large to convert to C long`
+- Set `TORCHINDUCTOR_CACHE_DIR` to a persistent path so the depth-decoder and
+  codec graphs are compiled only on the first start
+- MSVC Build Tools (C++ workload) and a CUDA toolkit are needed for Inductor's
+  code generation
+
+`start_webui.ps1` starts the accelerated WebUI with the 8 GB recipe. The first
+start compiles the graph stages (a few minutes); later starts reuse the Inductor
+cache. Measured on an RTX 4060 Laptop 8 GB: ~68–74 ms per audio frame and
+~0.55–0.61 s TTFA natively on Windows, versus ~60.5 ms per frame and ~0.21 s
+TTFA under WSL2 with FlashAttention; about 6.3 GiB reserved and 7.2 GiB peak.
 
 ### 🎙️ Voice Clone
 
